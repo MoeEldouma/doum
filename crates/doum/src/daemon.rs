@@ -1044,8 +1044,13 @@ async fn h_prometheus(AxState(s): AxState<Shared>) -> Response {
     ([("content-type", "text/plain; version=0.0.4; charset=utf-8")], body).into_response()
 }
 
-fn allowed_hosts(port: u16) -> Vec<String> {
-    ["127.0.0.1", "localhost", "[::1]"].iter().map(|h| format!("{h}:{port}")).collect()
+fn allowed_hosts(addr: std::net::SocketAddr) -> Vec<String> {
+    let mut h: Vec<String> = ["127.0.0.1", "localhost", "[::1]"]
+        .iter()
+        .map(|h| format!("{h}:{}", addr.port()))
+        .collect();
+    h.push(addr.to_string()); // the configured address itself, e.g. 127.0.0.2:8420
+    h
 }
 
 /// Only answer requests addressed to this machine by name. A web page can point its own domain at 127.0.0.1
@@ -1098,7 +1103,7 @@ pub async fn serve(cfg: Config, paths: Paths) -> Result<()> {
         anyhow::bail!("listen = {listen:?}: doum only listens on this machine (127.0.0.1 or ::1)");
     }
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    let hosts = Arc::new(allowed_hosts(addr.port()));
+    let hosts = Arc::new(allowed_hosts(addr));
     let app = router(shared).layer(axum::middleware::from_fn_with_state(hosts, host_guard));
     axum::serve(listener, app)
         .with_graceful_shutdown(async {

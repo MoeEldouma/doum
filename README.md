@@ -1,88 +1,216 @@
 # doum
 
-**Share one GPU between ComfyUI, local LLMs, training and AI agents — without out-of-memory crashes.**
-A smart queue for a single AI workstation: memory shards, wait-or-pause, automatic resume, notifications, and
-(coming) MCP tools so AI agents take turns too.
+**Share one GPU between ComfyUI, local LLMs, training jobs and AI agents, without out-of-memory crashes.**
+
+doum is a small queue for a single AI workstation. Every GPU job asks for *shards* of GPU memory, waits its turn,
+and gets paused and resumed when something more urgent needs the GPU.
+
+![doum demo: an interactive LLM job pauses a training run, waits for a render, then training resumes](docs/demo.gif)
+
+*Three jobs queued; an interactive 110-shard LLM job pauses the training run, waits for the render to finish and runs,
+then the training resumes from its checkpoint. Recorded with stand-in CPU jobs ([recipe](docs/demo/)).*
 
 > Named after the **doum palm** (دوم) of the Nile in Sudan: a tough, branching palm that survives the heat and gives
 > shade to every traveller who stops under it. One GPU, shade for every job.
 
-> **Status: pre-alpha, under active development.** Built and tested on an NVIDIA GB10 (DGX Spark-class, 128 GB unified
-> memory). Not ready for general use yet; see the roadmap.
+> **Status: v0.1.0 (unreleased).** Linux only. Built and tested on one machine: an NVIDIA GB10 (DGX Spark-class,
+> 128 GB unified memory). It should work on other NVIDIA Linux boxes, but nobody has tried yet. See
+> [Status and roadmap](#status-and-roadmap).
 
-## The problem
+## Why
 
 You run ComfyUI renders, a local LLM, a fine-tune and maybe an agent or two on one GPU. Start two heavy things at once
-and something crashes, or on unified-memory machines the whole box can lock up or power off at a model-load peak.
-ComfyUI queues its own work, Ollama queues its own work, but nothing queues *across* them.
+and one of them crashes with out-of-memory. On unified-memory machines it can be worse: the whole box can lock up or
+power off at a model-load peak. ComfyUI queues its own work and Ollama queues its own work, but nothing queues
+*across* them.
 
-## What doum does
+doum is that cross-app queue. It is one binary: a daemon on `127.0.0.1:8420`, a CLI, a terminal UI, a web panel and
+an MCP server.
 
-- **One queue for every GPU app.** Jobs ask for *shards* of GPU memory (~1 GB each). doum starts a job only when it
-  fits; small jobs share the GPU, big ones get it alone.
-- **Two lanes.** `--interactive` (someone is waiting: a chat, a writer) is always scheduled before batch work.
-- **Wait, pause or smart.** When a job does not fit, doum can wait, pause what is in the way, or be *smart*: let jobs
-  that finish soon complete and pause the long ones. Paused jobs get a signal to save a checkpoint, then **resume on
-  their own** when the GPU is free, ahead of newer work.
-- **Asks you when it matters.** With `mode = ask`, a desktop pop-up offers **Smart / Wait / Pause now**, with time
-  estimates from each job's own progress reports; no answer → the recommendation. If something you are waiting for has
-  waited too long (default 20 min), it checks back with you.
-- **Notices what bypasses it.** GPU processes outside the queue are reported (and alerted once).
-- **Pre-start safety hooks.** Free-memory check before every job (unified-memory aware), unload of an idle ComfyUI's
-  cached models, and your own gate (e.g. a thermal cool-down) as a hook.
-- **Survives restarts.** Background jobs run in their own process group; the daemon can restart without killing them.
+## What it does
 
-## Quick look
+- **One queue for every GPU app.** A job asks for shards of GPU memory (about 1 GB each; 110 shards by default). doum
+  starts a job only when its shards are free, so small jobs share the GPU and big ones get it alone.
+- **Two lanes.** `--interactive` jobs (someone is waiting at the screen: a chat, a writer) always start before batch
+  jobs. Inside a lane it is first come, first served, and nothing sneaks past the job at the front.
+- **Four modes for a busy GPU.** `wait` (queue and pause nothing), `pause` (pause whatever is in the way), `smart`
+  (let jobs that finish within 10 minutes complete, pause the longer ones) and `ask` (the default: a desktop pop-up
+  with Smart / Wait / Pause now; no answer in 60 s means smart).
+- **Pause means stop, requeue, resume.** A paused background job gets SIGTERM, has 90 s to save a checkpoint, and is
+  started again automatically when the GPU is free, ahead of newer work. (This is not a freeze of GPU state; your job
+  has to save and reload its own checkpoint. See [Pausable jobs](#pausable-jobs).)
+- **Checks back.** If an interactive or foreground job has waited 20 minutes, doum asks whether to pause what is in
+  the way, keep waiting, or cancel.
+- **Pre-start checks.** Before each job: wait for enough free memory (`MemAvailable`, which is the real GPU headroom
+  on unified memory), ask an idle ComfyUI to unload its cached models if that memory is needed, and run your own
+  `pre_start` hook (a thermal cool-down gate, for example).
+- **Notices GPU work that bypasses it.** Processes that show up in `nvidia-smi` but belong to no doum job are listed
+  in `doum status` and alerted once.
+- **Notifications.** Desktop pop-ups (with answer buttons for questions), ntfy phone push, and JSON webhooks.
+- **Progress and ETAs.** Jobs report `doum progress "epoch 3/10" --eta 2h`; smart decisions and time estimates use it.
+- **Energy per job.** GPU power from `nvidia-smi`, split between running jobs by shards.
+- **Ways to watch it.** `doum status`, `doum top` (terminal UI with controls), `doum panel` (web panel with
+  last-hour charts), and Prometheus metrics at `GET /metrics`.
+- **Integrations.** A ComfyUI plugin (every prompt waits its turn), llama-swap (local models start on demand as doum
+  jobs), and Claude Code (MCP tools with agent limits, a PreToolUse hook, a skill).
+- **Survives daemon restarts.** State is saved to disk after every change. Background jobs run in their own session
+  and process group and keep running while the daemon restarts (also `systemctl --user restart doum`); the restarted
+  daemon picks them up again.
+
+## Install
+
+Linux on x86_64 or aarch64. Release binaries are built on Ubuntu 22.04 (glibc 2.35).
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MoeEldouma/doum/main/install.sh | sh
+```
+
+This puts `doum` in `~/.local/bin`, checks the release's SHA-256, installs the systemd user service and starts it.
+Options:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MoeEldouma/doum/main/install.sh | DOUM_VERSION=v0.1.0 sh   # a specific release
+curl -fsSL https://raw.githubusercontent.com/MoeEldouma/doum/main/install.sh | DOUM_NO_SERVICE=1 sh    # binary only
+```
+
+From source (any recent stable Rust):
+
+```sh
+git clone https://github.com/MoeEldouma/doum && cd doum
+cargo build --release
+install -m 0755 target/release/doum ~/.local/bin/doum
+```
+
+The systemd unit and the ComfyUI plugin expect the binary at `~/.local/bin/doum`.
+[Getting started](docs/getting-started.md) covers the service, requirements and the first job.
+
+## Quick start
+
+Start the daemon (the installer already did this):
+
+```sh
+mkdir -p ~/.config/systemd/user && cp deploy/systemd/doum.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now doum
+# or, in a terminal: doum daemon
+```
+
+Run things through it:
+
+```sh
+doum status                                      # what is on the GPU, what is waiting, and why
+doum run -s 16 -- python generate.py             # foreground: waits its turn, then runs here (never paused)
+doum run -d -s 24 -n tts-train -- python train.py   # background (detached): logged, pausable; prints the job id
+doum run -i -s 110 -n writer -- ./writer.sh      # interactive lane: starts before batch work
+doum logs -f 2                                   # follow a background job's log
+```
+
+`-s/--shards` is how much GPU memory to reserve (default 8). `-d/--detach` runs the job in the background under the
+daemon; only detached jobs can be paused. `-i/--interactive` puts the job in the interactive lane. `-m/--mode`
+overrides the default mode for this job.
+
+Inside a job, report progress so doum can estimate and decide well:
+
+```sh
+doum progress "epoch 3/10" --eta 2h
+```
+
+### Quick look
+
+With `default_mode = "smart"` (or `-m smart`), a render with 5 minutes left and a training run with 2 hours left, an
+interactive job that needs the whole GPU pauses the training and waits for the render:
 
 ```console
-$ doum run -d -s 60 -n comfy-render -- python render_queue.py      # background, pausable
-$ doum run -d -s 24 -n tts-train    -- python train.py             # reports `doum progress "epoch 3/10" --eta 2h`
-$ doum run -i -s 110 -n writer      -- ollama-writer.sh            # needs the whole GPU, someone is waiting
+$ doum run -d -s 60 -n comfy-render -- python render_queue.py     # reports progress "clip 2/5" --eta 5m
+doum: job 1 'comfy-render' queued (60 shards)
+1
+$ doum run -d -s 24 -n tts-train -- python train.py               # reports progress "epoch 3/10" --eta 2h
+doum: job 2 'tts-train' queued (24 shards)
+2
+$ doum run -i -m smart -s 110 -n writer -- ./writer.sh
+doum: job 3 'writer' queued (110 shards)
 doum: pausing job(s) [2] to make room
 doum: expected start in ~5 min
+doum: waiting for 110 shards (26 free)
 ...
 doum: GPU ready, starting
 
-$ doum status
-GPU  [██████████████████████░░░░░░░░░░░░░░░░░░]  60/110 shards used · 94 GB memory free
+$ doum status          # (from another terminal, while the writer waits)
+GPU  [█████████████████████░░░░░░░░░░░░░░░░░░░]  60/110 shards used · 58 GB memory free
 
 RUNNING
-     1  comfy-render                   60 shards  batch     2m  ~5 min left  clip 2/5
+     1  comfy-render                  60 shards  batch          2 min  ~5 min left  clip 2/5
 
 WAITING (in start order)
-     3  writer                        110 shards  interactive  waiting for 110 shards (50 free)
-     2  tts-train                      24 shards  batch        paused; resumes when the GPU is free
+     3  writer                       110 shards  interactive waiting for 110 shards (50 free)
+     2  tts-train                     24 shards  batch       waiting behind jobs ahead in the queue
 ```
+
+When the writer has started, `tts-train` starts again on its own as soon as its 24 shards are free.
+
+### Pausable jobs
+
+Pausing is a stop and a restart, not a freeze. When doum pauses a detached job it:
+
+1. sends SIGTERM to the job's process group,
+2. waits up to `pause_grace_s` (90 s by default), then sends SIGKILL,
+3. puts the job back in the queue at its original place, and
+4. later runs **the same command again** (same directory, same environment, same `DOUM_JOB_ID`).
+
+So a pausable job must save a checkpoint when it gets SIGTERM (or at regular intervals) and pick up from that
+checkpoint when it starts. A job that cannot do that should be run with `--no-pause`, or in the foreground (foreground
+jobs are never paused). See [Getting started](docs/getting-started.md#writing-a-pausable-job) for an example.
+
+## Integrations
+
+| What | How | Docs |
+|---|---|---|
+| ComfyUI | `doum_gate` custom node: each prompt waits for a lease, the GPU is released when idle, pauses re-queue the interrupted prompt | [integrations.md](docs/integrations.md#comfyui) |
+| llama-swap / Ollama / llama.cpp | each model server is started by llama-swap as `doum run -i ...`; it unloads after `ttl` and frees its shards | [integrations.md](docs/integrations.md#llama-swap) |
+| Claude Code and other MCP clients | `doum mcp` (7 tools, agent limits), `doum claude-hook` PreToolUse hook, `gpu-share` skill | [integrations.md](docs/integrations.md#claude-code) |
+| Prometheus / Grafana | `GET http://127.0.0.1:8420/metrics` | [integrations.md](docs/integrations.md#prometheus-and-grafana) |
+| Phone / chat | ntfy topic, JSON webhooks | [integrations.md](docs/integrations.md#notifications) |
+
+## Documentation
+
+- [Getting started](docs/getting-started.md): install, the service, job lifecycle, modes, pausable jobs, commands
+- [Configuration](docs/configuration.md): every key in `~/.config/doum/doum.toml`, environment variables
+- [Integrations](docs/integrations.md): ComfyUI, llama-swap, Claude Code / MCP, Prometheus, notifications
+- [How it works](docs/how-it-works.md): scheduling rules, pre-start checks, restarts, security model, Slurm preview
 
 ## Design
 
 ```
- CLI · panel · desktop/phone alerts · MCP (agents)
+ CLI · doum top · web panel · desktop/phone alerts · MCP (agents)
                     │
-              doum daemon  ── smart decisions, ETAs, check-back, notifications
-                    │
-     backend: native (built in)  |  slurm (optional, for Slurm users)
+              doum daemon (127.0.0.1:8420): queue, smart decisions, ETAs, check-back, notifications
                     │
    ComfyUI (gate plugin) · llama-swap / Ollama / llama.cpp · training · scripts
                     │
-          pre-start hooks (memory, your thermal gate)  →  GPU
+          pre-start checks and hooks (free memory, your thermal gate)  →  GPU
 ```
 
 The scheduling rules are pure functions with unit tests (`crates/doum/src/sched.rs`).
 
-## Roadmap
+## Status and roadmap
+
+v0.1.0 is the first release. It has been run day to day on one NVIDIA GB10 (128 GB unified memory) with ComfyUI,
+llama-swap + Ollama and Claude Code. On that machine, gpt-oss-120b behind llama-swap loads and answers in 37 s and
+generates 37 tok/s warm, and its memory is fully returned on unload. Other GPUs, discrete-memory cards and
+multi-GPU machines are untested.
 
 - [x] Native queue: shards, lanes, strict order, smart / wait / pause / ask, requeue + resume, check-back,
       unmanaged-process detection, notifications (desktop, ntfy, webhooks)
-- [x] systemd user service
+- [x] systemd user service, install script, release builds for x86_64 and aarch64
 - [x] llama-swap integration: local LLMs started on demand as doum jobs, unloaded when idle
-      (tested on a GB10: gpt-oss-120b loads + answers in 37 s, 37 tok/s warm; memory fully returned on unload)
 - [x] `doum top` (terminal UI) and a web panel with history charts and energy per job
-- [x] MCP server for AI agents (agent-safe limits) + Claude Code skill and hook
-- [ ] ComfyUI gate plugin (each render waits its turn; queue saved and restored on pause)
-- [ ] Slurm backend
-- [ ] Prometheus metrics, docs site, packages, v0.1.0
+- [x] MCP server for AI agents (agent limits) + Claude Code skill and hook
+- [x] ComfyUI gate plugin
+- [x] Prometheus metrics (`GET /metrics`)
+- [ ] Slurm backend: config files and an install script exist in `deploy/slurm`, but the CLI does not use Slurm yet
+      (experimental preview)
+- [ ] Real pause: freezing GPU state with `cuda-checkpoint` instead of stop + restart
+- [ ] Packages, docs site, testing on more hardware
 
 ## License
 
-Apache-2.0
+Apache-2.0. Copyright Moe Eldouma.

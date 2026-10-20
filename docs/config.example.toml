@@ -1,27 +1,47 @@
-# Example doum config (~/.config/doum/doum.toml). Every key is optional; these are the defaults unless noted.
-total_shards = 110          # ~110 GB of the 121 GB unified pool
-gb_per_shard = 1.0
-listen = "127.0.0.1:8420"
-default_mode = "ask"        # pop-up with Smart / Wait / Pause; no answer in 60 s -> smart
-ask_timeout_s = 60
-smart_wait_s = 600          # smart waits for jobs finishing within 10 min, pauses longer ones
-max_wait_s = 1200           # check back after 20 min of waiting (interactive / foreground jobs)
-pause_grace_s = 90          # time to save a checkpoint before a paused job is killed
+# Example doum config: ~/.config/doum/doum.toml (or the path in DOUM_CONFIG).
+# Every key is optional. The values below are the defaults, except where a line says "example".
+# Full reference: docs/configuration.md
+
+total_shards = 110          # GPU memory budget in shards (~1 GB each); 110 of the ~121 GB unified pool on a GB10
+gb_per_shard = 1.0          # GB per shard, for the free-memory check
+listen = "127.0.0.1:8420"   # API + web panel; must be 127.0.0.1:<port> or [::1]:<port>
+default_mode = "ask"        # smart | wait | pause | ask. ask: pop-up with Smart / Wait / Pause now; no answer -> smart
+ask_timeout_s = 60          # how long a question stays open before the recommendation is applied
+smart_wait_s = 600          # smart: wait for jobs finishing within 10 min, pause longer (or unknown) ones
+max_wait_s = 1200           # check back after 20 min of waiting (interactive / foreground jobs); 0 = never
+pause_grace_s = 90          # time a paused job gets to save a checkpoint after SIGTERM, before SIGKILL
+unmanaged_min_gb = 1.0      # GPU processes outside the queue below this size are not reported
 
 [memory]
-check = true
-headroom_gb = 6
+check = true                # before a job starts, wait until MemAvailable >= job memory + headroom_gb
+headroom_gb = 6.0
 
-# gb10-guard: thermal cool-down + temperature + free-memory gate before every job (the power-off protection)
 [hooks]
-pre_start = ["python3", "-c", "import sys; sys.path.insert(0, '/path/to/gb10-guard'); import gate; gate.wait_ready(sys.argv[1]); gate.job_started(sys.argv[1])", "doum:{name}"]
-post_end  = ["python3", "-c", "import sys; sys.path.insert(0, '/path/to/gb10-guard'); import gate; gate.job_finished()"]
+# Run inside each job, around its command. {name} and {id} are replaced. A failing pre_start stops the job (exit 97).
+pre_start = []
+post_end = []
+# example: a thermal cool-down gate that blocks until the GPU is cool enough
+# pre_start = ["/home/me/bin/gpu-cooldown-gate", "--job", "doum:{name}"]
+# post_end  = ["/home/me/bin/gpu-cooldown-gate", "--finished"]
 
 [notify]
 desktop = true
-ntfy_url = ""               # phone push: set when the phone milestone is done
-webhooks = []
+ntfy_url = ""               # phone push, e.g. "https://ntfy.sh/<long-random-topic>" (keep the topic private)
+webhooks = []               # URLs that get a JSON POST of every alert and question
 
 [comfyui]
 url = "http://127.0.0.1:8188"
 free_when_idle = true       # unload ComfyUI's cached models (only when its queue is empty) if a job needs the memory
+
+[mcp]
+# Limits for AI agents using `doum mcp`.
+max_shards = 60             # largest job an agent may submit
+max_jobs = 2                # unfinished agent jobs at once (all agents together)
+mode = "wait"               # agent jobs never pause anyone else's work
+allow_control_others = false
+allow_answer = false
+
+[claude_hook]
+hint = ""                   # added to the hook's message when it blocks a command
+# example: hint = "Local LLMs load on demand at http://127.0.0.1:8410/v1 (llama-swap); no need to start a server."
+# gpu_patterns = [...]      # replaces the built-in list; see docs/configuration.md for the defaults

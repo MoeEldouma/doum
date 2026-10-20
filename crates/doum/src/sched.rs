@@ -123,11 +123,11 @@ pub fn plan(jobs: &[Job], total: u32, need: u32, mode: Mode, now: u64, smart_s: 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::job::{Lane, Progress};
 
-    fn job(id: JobId, lane: Lane, shards: u32, state: State, submitted: u64) -> Job {
+    pub(crate) fn job(id: JobId, lane: Lane, shards: u32, state: State, submitted: u64) -> Job {
         Job {
             id,
             name: format!("j{id}"),

@@ -10,6 +10,7 @@ mod job;
 mod mcp;
 mod metrics;
 mod notify;
+mod prom;
 mod sched;
 mod store;
 mod sys;

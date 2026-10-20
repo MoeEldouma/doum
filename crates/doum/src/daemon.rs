@@ -1029,12 +1029,18 @@ async fn h_metrics(AxState(s): AxState<Shared>, axum::extract::Query(q): axum::e
     Json(lock(&s).history.since(since))
 }
 
+async fn h_prometheus(AxState(s): AxState<Shared>) -> Response {
+    let body = crate::prom::render(&lock(&s).status());
+    ([("content-type", "text/plain; version=0.0.4; charset=utf-8")], body).into_response()
+}
+
 pub fn router(s: Shared) -> Router {
     Router::new()
         .route("/", get(h_index))
         .route("/login", get(h_login))
         .route("/api/status", get(h_status))
         .route("/api/metrics", get(h_metrics))
+        .route("/metrics", get(h_prometheus))
         .route("/api/jobs", post(h_submit))
         .route("/api/jobs/{id}", get(h_job))
         .route("/api/jobs/{id}/pause", post(h_pause))

@@ -152,6 +152,7 @@ pub(crate) mod tests {
             pending_since: submitted,
             pausing_since: None,
             paused_for: None,
+            runs: vec![],
             max_wait_s: 0,
             progress: Progress::default(),
             exit_code: None,

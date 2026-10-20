@@ -20,8 +20,30 @@
   .chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font: 12px var(--mono); color: var(--soft); background: var(--panel); }
   .chip b { color: var(--ink); font-weight: 600; }
   .warn { color: var(--sand); } .hot { color: var(--red); }
-  .bar { display: flex; height: 26px; border-radius: 8px; overflow: hidden; background: #0a0e0d; border: 1px solid var(--line); margin-bottom: 6px; }
-  .bar span { display: flex; align-items: center; justify-content: center; font: 11px var(--mono); color: #0d1110; white-space: nowrap; overflow: hidden; }
+  .bar { display: flex; height: 30px; border-radius: 9px; overflow: hidden; background: #0a0e0d; border: 1px solid var(--line); margin-bottom: 6px; position: relative; }
+  .bar span { display: flex; align-items: center; justify-content: center; font: 600 11px var(--mono); color: #0d1110; white-space: nowrap; overflow: hidden;
+    width: 0; transition: width .9s cubic-bezier(.2,.8,.2,1), opacity .5s; box-shadow: inset -1px 0 0 #0d1110; }
+  .bar span.pausing { background-image: repeating-linear-gradient(-45deg, rgba(13,17,16,.35) 0 6px, transparent 6px 12px) !important;
+    background-size: 17px 17px; animation: slide 0.8s linear infinite; }
+  .bar .want { position: absolute; top: 2px; bottom: 2px; right: 2px; border: 1.5px dashed var(--blue); border-radius: 7px; color: var(--blue);
+    font: 11px var(--mono); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; background: transparent; box-shadow: none;
+    transition: width .9s cubic-bezier(.2,.8,.2,1); pointer-events: none; }
+  @keyframes slide { to { background-position: 17px 0; } }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
+  .dot.live { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(111,207,142,.55); } 50% { box-shadow: 0 0 0 5px rgba(111,207,142,0); } }
+  .prog { grid-column: 1 / -1; height: 4px; background: #0a0e0d; border-radius: 3px; overflow: hidden; }
+  .prog i { display: block; height: 100%; transition: width 1.8s linear; }
+  .job.enter { animation: enter .6s cubic-bezier(.2,.8,.2,1); }
+  @keyframes enter { from { opacity: 0; transform: translateY(-8px); } }
+  .tl { position: relative; height: var(--h, 60px); background: #0a0e0d; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .tl .seg { position: absolute; height: 18px; border-radius: 5px; font: 600 10.5px var(--mono); color: #0d1110; padding: 0 6px; line-height: 18px;
+    white-space: nowrap; overflow: hidden; transition: left .9s linear, width .9s linear, top .4s; }
+  .tl .seg.paused-gap { background: transparent !important; border: 1px dashed; opacity: .55; }
+  .tl .now { position: absolute; top: 0; bottom: 0; right: 0; width: 2px; background: var(--palm); box-shadow: 0 0 8px var(--palm); }
+  .tl .tick { position: absolute; bottom: 2px; font: 10px var(--mono); color: var(--muted); transform: translateX(-50%); }
+  .tl .gl { position: absolute; top: 0; bottom: 14px; width: 1px; background: #18201d; }
+  .wide { margin-bottom: 16px; }
   .barcap { font: 12px var(--mono); color: var(--muted); margin-bottom: 18px; }
   .grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; }
   .col { display: grid; gap: 16px; align-content: start; }
@@ -65,6 +87,8 @@
 <div class="bar" id="bar"></div>
 <div class="barcap" id="barcap"></div>
 
+<section class="wide"><h2>Timeline <small style="text-transform:none;letter-spacing:0;color:var(--muted);font:12px var(--mono)">· jobs side by side, pauses as dashed gaps</small></h2><div class="tl" id="tl"></div></section>
+
 <div class="grid">
   <div class="col">
     <section><h2>Questions for you</h2><div id="questions"></div></section>
@@ -84,7 +108,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const dur = (s) => s == null ? "" : s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}`;
-const energy = (j) => j < 1 ? "" : j < 3.6e6 ? `${(j / 3600).toFixed(1)} Wh` : `${(j / 3.6e6).toFixed(2)} kWh`;
+const energy = (j) => j < 180 ? "" : j < 3.6e6 ? `${(j / 3600).toFixed(1)} Wh` : `${(j / 3.6e6).toFixed(2)} kWh`;
 const COLORS = ["#6fcf8e", "#7cc4f0", "#e7c27d", "#c99cf0", "#f09c7c", "#9ce0d6"];
 const label = { smart: "Smart", wait: "Wait", pause: "Pause now", "pause-now": "Pause now", "keep-waiting": "Keep waiting", cancel: "Cancel" };
 
@@ -98,6 +122,9 @@ async function act(path, body) {
 }
 window.act = act;
 
+const color = (id) => COLORS[id % COLORS.length];
+const seen = new Set();
+
 function jobRow(j, now, kind) {
   const eta = j.progress && j.progress.eta_s != null ? Math.max(0, j.progress.eta_s - (now - j.progress.updated_at)) : null;
   const ran = j.started_at ? dur(now - j.started_at) : "";
@@ -108,7 +135,61 @@ function jobRow(j, now, kind) {
   const acts = kind === "run"
     ? `${j.detached && !j.no_pause ? `<button onclick="act('/api/jobs/${j.id}/pause')">Pause</button>` : ""}<button class="danger" onclick="if(confirm('Cancel ${esc(j.name)}?'))act('/api/jobs/${j.id}/cancel')">Cancel</button>`
     : `<button onclick="act('/api/jobs/${j.id}/top')">Move up</button><button class="danger" onclick="act('/api/jobs/${j.id}/cancel')">Cancel</button>`;
-  return `<div class="job"><div><span class="name">${esc(j.name)}</span>${lane}<div class="meta">${meta}</div>${j.progress && j.progress.message ? `<div class="msg">${esc(j.progress.message)}</div>` : ""}</div><div class="acts">${acts}</div></div>`;
+  const isNew = !seen.has(`${kind}${j.id}`); seen.add(`${kind}${j.id}`);
+  const el = j.started_at ? now - j.started_at : 0;
+  const prog = kind === "run" && eta != null ? `<div class="prog"><i style="width:${Math.min(100, (100 * el) / Math.max(1, el + eta)).toFixed(1)}%;background:${color(j.id)}"></i></div>` : "";
+  const dot = kind === "run" ? `<span class="dot ${j.state === "running" ? "live" : ""}" style="background:${j.state === "pausing" ? "var(--sand)" : color(j.id)}"></span>` : "";
+  return `<div class="job${isNew ? " enter" : ""}"><div>${dot}<span class="name">${esc(j.name)}</span>${lane}<div class="meta">${meta}</div>${j.progress && j.progress.message ? `<div class="msg">${esc(j.progress.message)}</div>` : ""}</div><div class="acts">${acts}</div>${prog}</div>`;
+}
+
+// the shard bar: one segment per running job, kept between refreshes so widths animate instead of jumping
+function renderBar(running, s) {
+  const bar = $("bar"), keep = new Set();
+  for (const j of running) {
+    keep.add(String(j.id));
+    let el = bar.querySelector(`span[data-id="${j.id}"]`);
+    if (!el) {
+      el = document.createElement("span"); el.dataset.id = j.id; el.style.background = color(j.id);
+      bar.insertBefore(el, bar.querySelector(".want")); requestAnimationFrame(() => requestAnimationFrame(() => el.style.width = `${(100 * j.shards) / s.total_shards}%`));
+    } else el.style.width = `${(100 * j.shards) / s.total_shards}%`;
+    el.textContent = j.shards >= 10 ? j.name : "";
+    el.title = `${j.name} · ${j.shards} shards`;
+    el.classList.toggle("pausing", j.state === "pausing");
+  }
+  for (const el of [...bar.querySelectorAll("span[data-id]")]) if (!keep.has(el.dataset.id)) { el.style.width = "0"; el.style.opacity = "0"; el.removeAttribute("data-id"); setTimeout(() => el.remove(), 900); }
+  // the job at the front of the queue: a dashed outline of what it is waiting for
+  const head = s.queue.length ? s.jobs.find((j) => j.id === s.queue[0]) : null;
+  let want = bar.querySelector(".want");
+  const free = s.total_shards - s.used_shards;
+  if (head && free > 0) {
+    if (!want) { want = document.createElement("span"); want.className = "want"; bar.appendChild(want); }
+    want.style.width = `calc(${(100 * free) / s.total_shards}% - 4px)`;
+    want.textContent = free >= 12 ? `${head.name} needs ${head.shards}` : "";
+  } else if (want) want.remove();
+}
+
+// timeline: every run of every job in the window, packed onto as few tracks as possible
+function renderTimeline(s) {
+  const now = s.now, span = (j) => [...(j.runs || []), ...(j.started_at ? [[j.started_at, j.ended_at || now]] : [])];
+  const jobs = s.jobs.map((j) => ({ j, segs: span(j) })).filter((x) => x.segs.length);
+  const first = Math.min(...jobs.map((x) => x.segs[0][0]), now - 120);
+  const t0 = Math.max(first - 5, now - 15 * 60), W = Math.max(60, now - t0);
+  const live = jobs.filter((x) => x.segs[x.segs.length - 1][1] > t0).sort((a, b) => a.segs[0][0] - b.segs[0][0]);
+  const ends = [];
+  const x = (t) => (100 * (Math.max(t, t0) - t0)) / W;
+  let html = "";
+  for (let k = 1; k < 6; k++) { const t = t0 + (W * k) / 6; const ago = Math.round(now - t); html += `<div class="gl" style="left:${(100 * k) / 6}%"></div><span class="tick" style="left:${(100 * k) / 6}%">-${ago < 180 ? `${ago}s` : dur(ago)}</span>`; }
+  for (const { j, segs } of live) {
+    let tr = ends.findIndex((e) => e <= segs[0][0]); if (tr < 0) { tr = ends.length; ends.push(0); }
+    ends[tr] = segs[segs.length - 1][1] + 2;
+    const top = 6 + tr * 24, c = color(j.id);
+    segs.forEach(([a, b], i) => {
+      html += `<div class="seg" style="top:${top}px;left:${x(a)}%;width:${Math.max(0.6, x(b) - x(a))}%;background:${c}" title="${esc(j.name)}">${i === 0 || segs.length > 1 ? esc(j.name) : ""}</div>`;
+      if (i + 1 < segs.length) html += `<div class="seg paused-gap" style="top:${top}px;left:${x(b)}%;width:${Math.max(0.6, x(segs[i + 1][0]) - x(b))}%;border-color:${c};color:${c}">paused</div>`;
+    });
+  }
+  const tl = $("tl"); tl.style.setProperty("--h", `${Math.max(60, 26 + ends.length * 24)}px`);
+  tl.innerHTML = html + `<div class="now"></div>` || `<div class="empty">nothing has run yet</div>`;
 }
 
 function render(s) {
@@ -123,7 +204,8 @@ function render(s) {
   $("chips").innerHTML = chips.join("");
 
   const running = jobs.filter((j) => j.state === "running" || j.state === "pausing").sort((a, b) => a.started_at - b.started_at);
-  $("bar").innerHTML = running.map((j, i) => `<span title="${esc(j.name)} · ${j.shards} shards" style="width:${(100 * j.shards) / s.total_shards}%;background:${COLORS[i % COLORS.length]}">${esc(j.name)}</span>`).join("");
+  renderBar(running, s);
+  renderTimeline(s);
   $("barcap").textContent = `${free} shards free · ${running.length} running · ${s.queue.length} waiting`;
 
   $("running").innerHTML = running.map((j) => jobRow(j, now, "run")).join("") || `<div class="empty">nothing on the GPU</div>`;

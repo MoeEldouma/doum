@@ -1,0 +1,108 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>doum phone alerts</title>
+<style>
+  :root { --palm:#6fcf8e; --sand:#e7c27d; --red:#ff7d6b; --blue:#7cc4f0; }
+  * { box-sizing: border-box; margin: 0; }
+  body { width: 1200px; height: 860px; background: radial-gradient(1200px 700px at 30% 20%, #17211d, #0b0f0e); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         display: flex; align-items: center; justify-content: center; gap: 70px; color: #fff; overflow: hidden; }
+  .phone { position: relative; width: 390px; height: 800px; border-radius: 58px; padding: 14px; background: linear-gradient(145deg, #3a3f3d, #1a1d1c);
+           box-shadow: 0 40px 90px rgba(0,0,0,.6), inset 0 0 0 2px #4a504d; }
+  .screen { position: relative; width: 100%; height: 100%; border-radius: 46px; overflow: hidden;
+            background: radial-gradient(500px 420px at 70% 15%, #2b5a44 0%, transparent 60%), radial-gradient(420px 380px at 10% 90%, #5a4a2b 0%, transparent 60%), linear-gradient(180deg, #10201a, #0b1210); }
+  .island { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 118px; height: 34px; background: #000; border-radius: 20px; z-index: 5; }
+  .status { position: absolute; top: 18px; left: 34px; right: 30px; display: flex; justify-content: space-between; font-weight: 600; font-size: 15px; z-index: 4; }
+  .palm { position: absolute; right: -40px; bottom: -10px; opacity: .14; }
+  .clock { text-align: center; margin-top: 74px; }
+  .clock .d { font-size: 17px; font-weight: 500; opacity: .85; }
+  .clock .t { font-size: 84px; font-weight: 300; letter-spacing: -2px; line-height: 1; margin-top: 4px; }
+  .stack { position: absolute; left: 12px; right: 12px; top: 250px; display: flex; flex-direction: column; gap: 9px; }
+  .n { background: rgba(38,44,42,.72); backdrop-filter: blur(18px); border-radius: 22px; padding: 11px 14px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.25);
+       animation: drop .7s cubic-bezier(.2,.9,.25,1.15) both; }
+  .n .h { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: rgba(255,255,255,.62); margin-bottom: 3px; }
+  .n .ic { width: 22px; height: 22px; border-radius: 6px; background: #12201a; display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+  .n .ago { margin-left: auto; }
+  .n b { display: block; font-size: 14.5px; font-weight: 650; margin-bottom: 1px; }
+  .n p { font-size: 14px; line-height: 1.32; color: rgba(255,255,255,.88); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 6px; margin-left: 4px; }
+  .tag.w { background: rgba(231,194,125,.18); color: var(--sand); } .tag.q { background: rgba(124,196,240,.18); color: var(--blue); }
+  .tag.i { background: rgba(111,207,142,.16); color: var(--palm); } .tag.e { background: rgba(255,125,107,.18); color: var(--red); }
+  @keyframes drop { from { opacity: 0; transform: translateY(-40px) scale(.96); } }
+  /* expanded view */
+  .app { position: absolute; inset: 0; padding: 64px 18px 18px; background: #0f1513; }
+  .app .top { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; margin-bottom: 4px; }
+  .app .sub { font-size: 12.5px; color: rgba(255,255,255,.5); margin-bottom: 16px; font-family: ui-monospace, monospace; }
+  .card { background: #18201d; border: 1px solid #26302c; border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+  .card .h { display: flex; justify-content: space-between; font-size: 12px; color: rgba(255,255,255,.5); margin-bottom: 6px; }
+  .card b { display: block; font-size: 15.5px; margin-bottom: 6px; }
+  .card pre { white-space: pre-wrap; font: 13px/1.45 Inter, system-ui, sans-serif; color: rgba(255,255,255,.86); }
+  .card code { font: 12px ui-monospace, monospace; background: #0b100e; border: 1px solid #26302c; border-radius: 6px; padding: 2px 6px; color: var(--palm); }
+  .opts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .opts span { font-size: 13px; font-weight: 600; padding: 7px 12px; border-radius: 10px; background: #222b28; border: 1px solid #2e3a35; }
+  .opts span.rec { background: var(--palm); color: #0d1110; border-color: var(--palm); }
+  .cap { position: absolute; bottom: 14px; left: 0; right: 0; text-align: center; font-size: 12px; color: rgba(255,255,255,.35); }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs><symbol id="palm" viewBox="0 0 32 32"><path d="M16 30V14" stroke="#c9a46a" stroke-width="2.4" stroke-linecap="round"/><path d="M16 14C12 9 6 9 3 12M16 14c4-5 10-5 13-2M16 14c-2-6-7-9-11-8M16 14c2-6 7-9 11-8M16 14c0-6 0-9 0-11" stroke="#6fcf8e" stroke-width="2.2" fill="none" stroke-linecap="round"/></symbol></defs></svg>
+
+<div class="phone"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span>21:07</span><span>●●● 5G ▮</span></div>
+  <svg class="palm" width="300" height="300"><use href="#palm"/></svg>
+  <div class="clock"><div class="d">Tuesday 21 October</div><div class="t">21:07</div></div>
+  <div class="stack" id="stack"></div>
+</div></div>
+
+<div class="phone"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span>21:07</span><span>●●● 5G ▮</span></div>
+  <div class="app">
+    <div class="top"><svg width="26" height="26"><use href="#palm"/></svg>doum alerts</div>
+    <div class="sub">ntfy · your private topic</div>
+    <div class="card">
+      <div class="h"><span>the GPU is busy <span class="tag q">question</span></span><span>now</span></div>
+      <b>doum: the GPU is busy</b>
+      <pre>'llm-writer' needs 110 shards, 18 free. Running: 'comfy-render' (40 shards, 30s, clip 4/8); 'sdxl-batch' (20 shards, 18s, image 4/6); 'tts-train' (24 shards, 1h59, epoch 6/40).
+Smart: pause tts-train, start in ~30s.
+Wait: start in ~1h59.
+Pause now: pause all four; start in ~5s.
+(no answer by the deadline → smart)
+Answer: doum answer 5 &lt;smart|wait|pause-now&gt;</pre>
+      <div style="margin-top:12px;font-size:12px;line-height:1.5;color:rgba(255,255,255,.55)">Answer in the panel, the desktop pop-up or <code>doum answer 5 smart</code>. No answer: doum goes with Smart.</div>
+    </div>
+    <div class="card">
+      <div class="h"><span>pause <span class="tag i">info</span></span><span>1 min ago</span></div>
+      <b>doum: pausing 'tts-train'</b>
+      <pre>paused to make room for 'llm-writer'. It resumes automatically when the GPU is free.</pre>
+    </div>
+    <div class="card">
+      <div class="h"><span>resume <span class="tag i">info</span></span><span>just now</span></div>
+      <b>doum: 'tts-train' resumed</b>
+      <pre>the GPU is free again</pre>
+    </div>
+  </div>
+  <div class="cap">illustration · real doum alert text</div>
+</div></div>
+
+<script>
+const N = [
+  ["q", "question", "doum: the GPU is busy", "'llm-writer' needs 110 shards, 18 free. Smart: pause tts-train, start in ~30s. (no answer by the deadline → smart)", "now"],
+  ["i", "info", "doum: pausing 'tts-train'", "paused to make room for 'llm-writer'. It resumes automatically when the GPU is free.", "now"],
+  ["i", "info", "doum: 'llm-writer' finished", "after 4 min", "now"],
+  ["i", "info", "doum: 'tts-train' resumed", "the GPU is free again", "now"],
+  ["w", "warning", "doum: GPU used outside the queue", "python (pid 48211, ~14 GB) is using the GPU without doum. Run it with `doum run` so it waits its turn.", "now"],
+  ["e", "failed", "doum: 'comfy-render-2' failed", "exit code 1; see its log: doum logs 7", "now"],
+];
+const stack = document.getElementById("stack");
+const ago = ["now", "1m ago", "2m ago", "3m ago", "5m ago", "8m ago"];
+function show(k) {
+  const [c, t, title, body] = N[k];
+  const el = document.createElement("div"); el.className = "n";
+  el.innerHTML = `<div class="h"><span class="ic"><svg width="16" height="16"><use href="#palm"/></svg></span>NTFY · doum<span class="tag ${c}">${t}</span><span class="ago">now</span></div><b>${title}</b><p>${body}</p>`;
+  stack.prepend(el);
+  [...stack.children].forEach((n, i) => n.querySelector(".ago").textContent = ago[i] || "earlier");
+  while (stack.children.length > 5) stack.lastChild.remove();
+}
+window.play = (stepMs) => N.forEach((_, k) => setTimeout(() => show(k), 400 + k * stepMs));
+window.all = () => N.forEach((_, k) => show(k));
+</script>
+</body></html>

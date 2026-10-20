@@ -160,6 +160,48 @@ So a pausable job must save a checkpoint when it gets SIGTERM (or at regular int
 checkpoint when it starts. A job that cannot do that should be run with `--no-pause`, or in the foreground (foreground
 jobs are never paused). See [Getting started](docs/getting-started.md#writing-a-pausable-job) for an example.
 
+## Watch it live
+
+![doum web panel: four jobs share the GPU, an interactive LLM job asks to pause the training run, then everything resumes](docs/media/panel.gif)
+
+*The web panel (`doum panel`) during a busy few minutes, sped up 6x: a ComfyUI render, an SDXL batch, a training run and
+an agent eval share the GPU; an interactive LLM job needs all 110 shards and asks what to do; Smart pauses the training
+run, waits for the short jobs, runs the LLM, and the training resumes from its checkpoint. Recorded with stand-in CPU
+jobs ([recipe](docs/demo/)).*
+
+- **Shard bar:** one segment per running job, growing and shrinking as jobs start and end. A paused job's segment
+  stripes while it saves its checkpoint; a dashed outline shows what the job at the front of the queue is waiting for.
+- **Timeline:** every run of every job in the last 15 minutes on parallel tracks, so you see what shared the GPU and
+  when. Pauses show as dashed gaps.
+- **Questions for you:** when a job does not fit, the choices (Smart / Wait / Pause now) with doum's time estimates
+  and a countdown to the default.
+- **Running and waiting:** progress messages and ETAs from `doum progress`, a progress bar per job, energy per job,
+  and Pause / Cancel / Move up buttons.
+- **Last hour:** shards used, free memory, GPU and SoC temperature, GPU power.
+
+Prefer the terminal? `doum top` shows the same queue with keyboard controls.
+
+## Alerts on your phone
+
+![doum alerts on a phone via ntfy: a question, a pause, a resume, a failed job and GPU use outside the queue](docs/media/phone-alerts.gif)
+
+doum pushes to the free, open-source [ntfy](https://ntfy.sh) app (iOS and Android), so you know what your GPU is doing
+when you are away from the desk:
+
+| Alert | When | Priority |
+|---|---|---|
+| `doum: the GPU is busy` | a job does not fit and its mode is `ask`: the options, time estimates and the default | high |
+| `doum: pausing '<job>'` | a job is paused to make room (it resumes on its own) | default |
+| `doum: '<job>' resumed` | a paused job starts again | default |
+| `doum: '<job>' finished` | a background (`-d`) job completes, with how long it ran | default |
+| `doum: '<job>' failed` | a job exits non-zero (with the exit code and the `doum logs` command) | high |
+| `doum: GPU used outside the queue` | a process uses the GPU without doum (once per process) | high |
+
+Setup takes two minutes: install the ntfy app, subscribe to a long random topic, and put its URL in
+`~/.config/doum/doum.toml` as `[notify] ntfy_url`. The full guide, with privacy notes, self-hosting and
+troubleshooting, is in [docs/phone-alerts.md](docs/phone-alerts.md). Webhooks (JSON) work the same way for Slack,
+Discord or your own scripts.
+
 ## Integrations
 
 | What | How | Docs |
@@ -175,6 +217,7 @@ jobs are never paused). See [Getting started](docs/getting-started.md#writing-a-
 - [Getting started](docs/getting-started.md): install, the service, job lifecycle, modes, pausable jobs, commands
 - [Configuration](docs/configuration.md): every key in `~/.config/doum/doum.toml`, environment variables
 - [Integrations](docs/integrations.md): ComfyUI, llama-swap, Claude Code / MCP, Prometheus, notifications
+- [Phone alerts](docs/phone-alerts.md): ntfy setup, what each alert means, privacy, troubleshooting
 - [How it works](docs/how-it-works.md): scheduling rules, pre-start checks, restarts, security model, Slurm preview
 
 ## Design
@@ -208,6 +251,7 @@ multi-GPU machines are untested.
 - [x] Prometheus metrics (`GET /metrics`)
 - [ ] Slurm backend: config files and an install script exist in `deploy/slurm`, but the CLI does not use Slurm yet
       (experimental preview)
+- [ ] Answer doum's questions from your phone (today: notify only; answer in the panel, pop-up or CLI)
 - [ ] Real pause: freezing GPU state with `cuda-checkpoint` instead of stop + restart
 - [ ] Packages, docs site, testing on more hardware
 

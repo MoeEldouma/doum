@@ -1,0 +1,16 @@
+total_shards = 110
+listen = "127.0.0.1:8497"
+default_mode = "smart"
+smart_wait_s = 600
+ask_timeout_s = 40
+max_wait_s = 0
+pause_grace_s = 5
+unmanaged_min_gb = 100000
+[memory]
+check = false
+[notify]
+desktop = false
+ntfy_url = ""
+[comfyui]
+url = "http://127.0.0.1:1"
+free_when_idle = false

@@ -100,6 +100,10 @@ pub struct Job {
     pub requeues: u32,
     /// When it last became Pending (submit or requeue); drives the check-back timer.
     pub pending_since: u64,
+    /// Earlier runs of this job that ended in a pause, as [start, end] (unix seconds). The current or last run is
+    /// started_at..ended_at. Drawn as the panel's timeline.
+    #[serde(default)]
+    pub runs: Vec<[u64; 2]>,
     /// This job was paused to make room for that job; it stays held until that job has started.
     #[serde(default)]
     pub paused_for: Option<JobId>,

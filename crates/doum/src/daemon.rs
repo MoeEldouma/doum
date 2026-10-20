@@ -204,6 +204,7 @@ impl Daemon {
             pending_since: t,
             pausing_since: None,
             paused_for: None,
+            runs: vec![],
             max_wait_s: r.max_wait_s.unwrap_or(self.cfg.max_wait_s),
             progress: Progress::default(),
             exit_code: None,
@@ -646,6 +647,9 @@ impl Daemon {
                 jm.requeues += 1;
                 jm.pending_since = t;
                 jm.pausing_since = None;
+                if let Some(s) = jm.started_at {
+                    jm.runs.push([s, t]);
+                }
                 jm.started_at = None;
                 jm.pid = None;
                 jm.reason = "paused; resumes when the GPU is free".into();
@@ -761,6 +765,9 @@ impl Daemon {
                         jm.state = State::Failed;
                         jm.ended_at = Some(t);
                         jm.reason = format!("could not start: {e}");
+                        let name = jm.name.clone();
+                        self.notifier
+                            .alert(&format!("doum: '{name}' failed"), &format!("could not start: {e}"), Level::Warn);
                     }
                 }
             } else {

@@ -57,6 +57,12 @@ enum Cmd {
         /// Never pause this job.
         #[arg(long)]
         no_pause: bool,
+        /// Skip the pre-start checks and hooks (the app runs its own).
+        #[arg(long)]
+        no_hooks: bool,
+        /// pid of a process this job stands for (e.g. a server holding a lease); repeatable.
+        #[arg(long = "covers-pid")]
+        covers_pids: Vec<i32>,
         /// Ask me after this long still waiting (e.g. 20m; 0 = never).
         #[arg(long, value_parser = humantime::parse_duration)]
         max_wait: Option<Duration>,
@@ -115,6 +121,8 @@ enum Cmd {
         name: String,
         #[arg(long, default_value_t = 0.0)]
         mem_gb: f64,
+        #[arg(long)]
+        no_hooks: bool,
         #[arg(trailing_var_arg = true)]
         command: Vec<String>,
     },
@@ -153,6 +161,7 @@ fn real_main(cli: Cli) -> Result<()> {
             attempt,
             name,
             mem_gb,
+            no_hooks,
             command,
         } => {
             let code = exec::run(
@@ -163,6 +172,7 @@ fn real_main(cli: Cli) -> Result<()> {
                     attempt,
                     name: &name,
                     mem_gb,
+                    no_hooks,
                     cmd: &command,
                 },
             );
@@ -176,12 +186,12 @@ fn real_main(cli: Cli) -> Result<()> {
             mode,
             detach,
             no_pause,
+            no_hooks,
+            covers_pids,
             max_wait,
             command,
         } => {
-            let code = run(
-                &cfg,
-                &paths,
+            let o = RunOpts {
                 shards,
                 mem,
                 name,
@@ -189,9 +199,11 @@ fn real_main(cli: Cli) -> Result<()> {
                 mode,
                 detach,
                 no_pause,
+                no_hooks,
+                covers_pids,
                 max_wait,
-                command,
-            )?;
+            };
+            let code = run(&cfg, &paths, o, command)?;
             std::process::exit(code);
         }
         Cmd::Status { json, all } => {
@@ -210,7 +222,11 @@ fn real_main(cli: Cli) -> Result<()> {
             let token = std::fs::read_to_string(paths.token_file()).unwrap_or_default();
             let url = format!("http://{}/login?token={}", cfg.listen, token.trim());
             println!("opening http://{}/", cfg.listen);
-            std::process::Command::new("xdg-open").arg(&url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()?;
+            std::process::Command::new("xdg-open")
+                .arg(&url)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
             Ok(())
         }
         Cmd::Pause { id } => simple(
@@ -273,10 +289,7 @@ fn simple(cfg: &Config, paths: &Paths, path: &str, body: serde_json::Value, ok: 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run(
-    cfg: &Config,
-    paths: &Paths,
+struct RunOpts {
     shards: u32,
     mem: Option<f64>,
     name: Option<String>,
@@ -284,9 +297,24 @@ fn run(
     mode: Option<Mode>,
     detach: bool,
     no_pause: bool,
+    no_hooks: bool,
+    covers_pids: Vec<i32>,
     max_wait: Option<Duration>,
-    command: Vec<String>,
-) -> Result<i32> {
+}
+
+fn run(cfg: &Config, paths: &Paths, o: RunOpts, command: Vec<String>) -> Result<i32> {
+    let RunOpts {
+        shards,
+        mem,
+        name,
+        interactive,
+        mode,
+        detach,
+        no_pause,
+        no_hooks,
+        covers_pids,
+        max_wait,
+    } = o;
     let c = Client::new(cfg, paths)?;
     let env: BTreeMap<String, String> = std::env::vars().filter(|(k, _)| !k.starts_with("DOUM_")).collect();
     let name = name.unwrap_or_else(|| {
@@ -299,6 +327,7 @@ fn run(
         "name": name, "cmd": command, "cwd": std::env::current_dir()?.display().to_string(), "env": env,
         "shards": shards, "mem_gb": mem, "lane": if interactive { Lane::Interactive } else { Lane::Batch },
         "mode": mode, "detached": detach, "no_pause": no_pause, "max_wait_s": max_wait.map(|d| d.as_secs()),
+        "no_hooks": no_hooks, "covers_pids": covers_pids,
         "owner": std::env::var("USER").unwrap_or_default(), "client_pid": if detach { None } else { Some(std::process::id() as i32) },
     });
     let r: SubmitResp = c.post("/api/jobs", &body)?;
@@ -375,6 +404,7 @@ fn run(
             attempt: j.requeues,
             name: &j.name,
             mem_gb,
+            no_hooks: j.no_hooks,
             cmd: &j.cmd,
         },
     );

@@ -25,6 +25,8 @@ pub struct Config {
     pub ask_timeout_s: u64,
     /// Time a paused job gets to save a checkpoint after SIGTERM, before SIGKILL.
     pub pause_grace_s: u64,
+    /// GPU processes outside the queue smaller than this (GB) are not reported (driver contexts, idle servers).
+    pub unmanaged_min_gb: f64,
     pub memory: MemoryCfg,
     pub hooks: Hooks,
     pub notify: NotifyCfg,
@@ -86,12 +88,19 @@ pub struct McpCfg {
 
 impl Default for McpCfg {
     fn default() -> Self {
-        Self { max_shards: 60, max_jobs: 2, mode: Mode::Wait, allow_control_others: false, allow_answer: false }
+        Self {
+            max_shards: 60,
+            max_jobs: 2,
+            mode: Mode::Wait,
+            allow_control_others: false,
+            allow_answer: false,
+        }
     }
 }
 
 /// `doum claude-hook`: a Claude Code PreToolUse hook that stops shell commands which would start GPU work
-/// outside the queue. Patterns are case-insensitive regular expressions.
+/// outside the queue. Patterns are case-insensitive regular expressions. (ComfyUI is covered by its doum_gate plugin
+/// instead: every prompt waits its turn, however it was posted.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClaudeHookCfg {
@@ -110,7 +119,6 @@ impl Default for ClaudeHookCfg {
                 r"\btorchrun\b",
                 r"\baccelerate\s+launch\b",
                 r"\bpython[0-9.]*\s+[^|;&]*\b[\w-]*(train|finetune|fine_tune|infer|inference|generate|render)[\w-]*\.py\b",
-                r"(127\.0\.0\.1|localhost):8188/(api/)?prompt\b",
             ]
             .iter()
             .map(|s| s.to_string())
@@ -130,6 +138,7 @@ impl Default for Config {
             max_wait_s: 1200,
             ask_timeout_s: 60,
             pause_grace_s: 90,
+            unmanaged_min_gb: 1.0,
             memory: MemoryCfg::default(),
             hooks: Hooks::default(),
             notify: NotifyCfg::default(),

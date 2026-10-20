@@ -82,6 +82,12 @@ pub struct Job {
     /// The job (or its owner) said it must never be paused.
     pub no_pause: bool,
     pub owner: String,
+    /// Skip the pre-start checks and hooks (for leases whose app runs its own checks, e.g. ComfyUI's guard plugin).
+    #[serde(default)]
+    pub no_hooks: bool,
+    /// Processes this job stands for (e.g. a ComfyUI server holding a lease): not reported as outside the queue.
+    #[serde(default)]
+    pub covers_pids: Vec<i32>,
     pub state: State,
     pub submitted_at: u64,
     pub started_at: Option<u64>,

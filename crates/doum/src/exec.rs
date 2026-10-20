@@ -26,6 +26,7 @@ pub struct ExecArgs<'a> {
     pub attempt: u32,
     pub name: &'a str,
     pub mem_gb: f64,
+    pub no_hooks: bool,
     pub cmd: &'a [String],
 }
 
@@ -50,6 +51,7 @@ pub fn spawn_detached(paths: &Paths, job: &Job, mem_gb: f64, api: &str, token: &
             &job.name,
         ])
         .args(["--mem-gb", &format!("{mem_gb}")])
+        .args(if job.no_hooks { vec!["--no-hooks"] } else { vec![] })
         .arg("--")
         .args(&job.cmd)
         .env_clear()
@@ -179,7 +181,9 @@ fn wait_for_memory(cfg: &Config, a: &ExecArgs) {
 pub fn run(cfg: &Config, paths: &Paths, a: &ExecArgs) -> i32 {
     let code = run_inner(cfg, paths, a);
     let _ = std::fs::write(paths.exit_file(a.id, a.attempt), code.to_string());
-    run_hook(&cfg.hooks.post_end, a, "post-end");
+    if !a.no_hooks {
+        run_hook(&cfg.hooks.post_end, a, "post-end");
+    }
     code
 }
 
@@ -189,9 +193,11 @@ fn run_inner(cfg: &Config, paths: &Paths, a: &ExecArgs) -> i32 {
         return 2;
     }
     // Stop signals that arrive during the checks end the job before the command starts.
-    wait_for_memory(cfg, a);
-    if !run_hook(&cfg.hooks.pre_start, a, "pre-start") {
-        return EXIT_PRESTART_FAILED;
+    if !a.no_hooks {
+        wait_for_memory(cfg, a);
+        if !run_hook(&cfg.hooks.pre_start, a, "pre-start") {
+            return EXIT_PRESTART_FAILED;
+        }
     }
     let mut c = Command::new(&a.cmd[0]);
     c.args(&a.cmd[1..]).process_group(0);

@@ -14,7 +14,9 @@ pub fn check(cfg: &ClaudeHookCfg, command: &str) -> Option<String> {
         return None;
     }
     for p in &cfg.gpu_patterns {
-        let Ok(re) = RegexBuilder::new(p).case_insensitive(true).build() else { continue };
+        let Ok(re) = RegexBuilder::new(p).case_insensitive(true).build() else {
+            continue;
+        };
         if let Some(m) = re.find(command) {
             return Some(format!(
                 "`{}` starts GPU work outside the GPU queue (doum). On this machine all GPU work goes through doum so jobs \
@@ -71,7 +73,6 @@ mod tests {
         assert!(blocked("cd x && python3 train_lora.py --epochs 3"));
         assert!(blocked("python scripts/render_episode.py"));
         assert!(blocked("torchrun --nproc 1 finetune.py"));
-        assert!(blocked("curl -X POST http://127.0.0.1:8188/prompt -d @wf.json"));
     }
 
     #[test]

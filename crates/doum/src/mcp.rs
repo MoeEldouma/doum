@@ -88,7 +88,10 @@ impl DoumMcp {
     async fn own_job(&self, id: u64) -> Result<Job, String> {
         let j: Job = self.call(move |c| c.get(&format!("/api/jobs/{id}"))).await?;
         if j.owner != OWNER && !self.cfg.mcp.allow_control_others {
-            return Err(format!("job {id} '{}' belongs to {}, not to an agent; ask the user to pause or cancel it", j.name, j.owner));
+            return Err(format!(
+                "job {id} '{}' belongs to {}, not to an agent; ask the user to pause or cancel it",
+                j.name, j.owner
+            ));
         }
         Ok(j)
     }
@@ -106,16 +109,27 @@ fn summarize(s: &StatusView) -> String {
     out.push(format!("Running ({}):", running.len()));
     for j in running {
         let eta = j.eta_left(s.now).map(|e| format!(", ~{} left", fmt_dur(e))).unwrap_or_default();
-        out.push(format!("  #{} {} [{} shards, {:?}, owner {}{eta}] {}", j.id, j.name, j.shards, j.lane, j.owner, j.progress.message));
+        out.push(format!(
+            "  #{} {} [{} shards, {:?}, owner {}{eta}] {}",
+            j.id, j.name, j.shards, j.lane, j.owner, j.progress.message
+        ));
     }
     out.push(format!("Waiting in start order ({}):", s.queue.len()));
     for id in &s.queue {
         if let Some(j) = s.jobs.iter().find(|j| j.id == *id) {
-            out.push(format!("  #{} {} [{} shards, owner {}] {}", j.id, j.name, j.shards, j.owner, j.reason));
+            out.push(format!(
+                "  #{} {} [{} shards, owner {}] {}",
+                j.id, j.name, j.shards, j.owner, j.reason
+            ));
         }
     }
     for d in &s.decisions {
-        out.push(format!("Open question #{} for the user: {} (options: {})", d.id, d.text.replace('\n', " "), d.options.join(", ")));
+        out.push(format!(
+            "Open question #{} for the user: {} (options: {})",
+            d.id,
+            d.text.replace('\n', " "),
+            d.options.join(", ")
+        ));
     }
     for p in &s.unmanaged {
         out.push(format!("Outside the queue: {} pid {} (~{:.1} GB)", p.name, p.pid, p.mem_gb));
@@ -133,7 +147,10 @@ fn tail(path: &str, n: usize) -> String {
 }
 
 fn describe(j: &Job, now: u64) -> String {
-    let mut s = format!("#{} {} — {:?}: {}. {} shards, lane {:?}.", j.id, j.name, j.state, j.reason, j.shards, j.lane);
+    let mut s = format!(
+        "#{} {} — {:?}: {}. {} shards, lane {:?}.",
+        j.id, j.name, j.state, j.reason, j.shards, j.lane
+    );
     if !j.progress.message.is_empty() {
         s.push_str(&format!(" Progress: {}", j.progress.message));
         if let Some(e) = j.eta_left(now) {
@@ -156,7 +173,10 @@ fn describe(j: &Job, now: u64) -> String {
 #[tool_router]
 impl DoumMcp {
     pub fn new(cfg: Config, paths: Paths) -> Self {
-        Self { cfg: Arc::new(cfg), paths: Arc::new(paths) }
+        Self {
+            cfg: Arc::new(cfg),
+            paths: Arc::new(paths),
+        }
     }
 
     #[tool(
@@ -173,14 +193,24 @@ impl DoumMcp {
     async fn gpu_run(&self, Parameters(p): Parameters<RunParams>) -> Result<String, String> {
         let m = &self.cfg.mcp;
         if p.shards == 0 || p.shards > m.max_shards {
-            return Err(format!("shards must be 1..={} for agent jobs (ask the user to raise [mcp] max_shards)", m.max_shards));
+            return Err(format!(
+                "shards must be 1..={} for agent jobs (ask the user to raise [mcp] max_shards)",
+                m.max_shards
+            ));
         }
         let s: StatusView = self.call(|c| c.get("/api/status")).await?;
         let mine = s.jobs.iter().filter(|j| j.owner == OWNER && !j.state.is_terminal()).count();
         if mine >= m.max_jobs as usize {
-            return Err(format!("agents may have at most {} jobs queued or running; wait for one to finish", m.max_jobs));
+            return Err(format!(
+                "agents may have at most {} jobs queued or running; wait for one to finish",
+                m.max_jobs
+            ));
         }
-        let cwd = p.cwd.unwrap_or_else(|| std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_else(|_| "/".into()));
+        let cwd = p.cwd.unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_else(|_| "/".into())
+        });
         let env: std::collections::BTreeMap<String, String> = std::env::vars().filter(|(k, _)| !k.starts_with("DOUM_")).collect();
         let body = json!({
             "name": p.name, "cmd": ["bash", "-lc", p.command], "cwd": cwd, "env": env, "shards": p.shards, "mem_gb": p.mem_gb,
@@ -188,7 +218,10 @@ impl DoumMcp {
             "no_pause": false, "owner": OWNER,
         });
         let r: SubmitResp = self.call(move |c| c.post("/api/jobs", &body)).await?;
-        let mut msg = format!("Queued job #{} '{}' ({} shards): {}.", r.job.id, r.job.name, r.job.shards, r.job.reason);
+        let mut msg = format!(
+            "Queued job #{} '{}' ({} shards): {}.",
+            r.job.id, r.job.name, r.job.shards, r.job.reason
+        );
         if let Some(e) = r.plan.and_then(|p| p.eta_s) {
             msg.push_str(&format!(" Expected start in ~{}.", fmt_dur(e)));
         }
@@ -209,7 +242,11 @@ impl DoumMcp {
         let id = p.id;
         loop {
             let j: Job = self.call(move |c| c.get(&format!("/api/jobs/{id}"))).await?;
-            let done = if p.until_finished { j.state.is_terminal() } else { j.state == State::Running || j.state.is_terminal() };
+            let done = if p.until_finished {
+                j.state.is_terminal()
+            } else {
+                j.state == State::Running || j.state.is_terminal()
+            };
             if done || std::time::Instant::now() >= deadline {
                 return Ok(describe(&j, crate::job::now()));
             }
@@ -238,10 +275,14 @@ impl DoumMcp {
     )]
     async fn gpu_answer(&self, Parameters(p): Parameters<AnswerParams>) -> Result<String, String> {
         if !self.cfg.mcp.allow_answer {
-            return Err("agents may not answer the user's GPU questions (config [mcp] allow_answer = false); tell the user about it".into());
+            return Err(
+                "agents may not answer the user's GPU questions (config [mcp] allow_answer = false); tell the user about it".into(),
+            );
         }
         let (q, choice) = (p.question, p.choice.clone());
-        let _: serde_json::Value = self.call(move |c| c.post(&format!("/api/decisions/{q}"), &json!({ "choice": choice }))).await?;
+        let _: serde_json::Value = self
+            .call(move |c| c.post(&format!("/api/decisions/{q}"), &json!({ "choice": choice })))
+            .await?;
         Ok(format!("Answered question #{} with '{}'.", p.question, p.choice))
     }
 }

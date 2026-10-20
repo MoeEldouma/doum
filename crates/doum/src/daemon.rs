@@ -66,6 +66,10 @@ pub struct SubmitReq {
     pub max_wait_s: Option<u64>,
     #[serde(default)]
     pub owner: String,
+    #[serde(default)]
+    pub no_hooks: bool,
+    #[serde(default)]
+    pub covers_pids: Vec<i32>,
     /// Foreground jobs: the pid of the `doum run` client that will run the command.
     #[serde(default)]
     pub client_pid: Option<i32>,
@@ -189,6 +193,8 @@ impl Daemon {
             detached: r.detached,
             no_pause: r.no_pause || !r.detached,
             owner: r.owner,
+            no_hooks: r.no_hooks,
+            covers_pids: r.covers_pids,
             state: State::Pending,
             submitted_at: t,
             started_at: None,
@@ -567,6 +573,21 @@ impl Daemon {
     }
 
     fn reap(&mut self, t: u64) {
+        // A lease that stands for other processes (e.g. a ComfyUI server) ends when all of them have exited,
+        // so a restarted or crashed app never leaves its shards reserved.
+        let orphans: Vec<JobId> = self
+            .store
+            .jobs
+            .iter()
+            .filter(|j| !j.state.is_terminal() && !j.covers_pids.is_empty() && !j.covers_pids.iter().any(|p| sys::pid_alive(*p)))
+            .map(|j| j.id)
+            .collect();
+        for id in orphans {
+            let _ = self.cancel(id);
+            if let Some(j) = self.store.job_mut(id) {
+                j.reason = "the app it stood for has exited".into();
+            }
+        }
         let grace = self.cfg.pause_grace_s;
         let ids: Vec<JobId> = self
             .store
@@ -756,10 +777,16 @@ impl Daemon {
 
     /// Record a history sample and attribute GPU energy to the running jobs.
     fn sample(&mut self, t: u64) {
-        let dt = if self.last_sample == 0 { 0.0 } else { (t - self.last_sample) as f64 };
+        let dt = if self.last_sample == 0 {
+            0.0
+        } else {
+            (t - self.last_sample) as f64
+        };
         self.last_sample = t;
         let (gpu_c, gpu_w) = metrics::gpu_temp_power();
-        let running: Vec<usize> = (0..self.store.jobs.len()).filter(|i| self.store.jobs[*i].state.holds_shards()).collect();
+        let running: Vec<usize> = (0..self.store.jobs.len())
+            .filter(|i| self.store.jobs[*i].state.holds_shards())
+            .collect();
         if let (Some(w), true) = (gpu_w, dt > 0.0 && dt < 120.0) {
             let shards: Vec<u32> = running.iter().map(|i| self.store.jobs[*i].shards).collect();
             for (k, e) in metrics::split_energy(&shards, w, dt).into_iter().enumerate() {
@@ -811,8 +838,10 @@ impl Daemon {
                     pg == Some(root)
                         || exec::child_pgid(&self.paths, j.id, j.requeues).is_some_and(|c| pg == Some(c))
                         || sys::descends_from(p.pid, root)
+                        || j.covers_pids.iter().any(|c| sys::descends_from(p.pid, *c))
                 })
             })
+            .filter(|p| p.mem_gb >= self.cfg.unmanaged_min_gb)
             .collect()
     }
 
@@ -894,7 +923,10 @@ fn authed(d: &Daemon, h: &HeaderMap) -> Result<(), ApiErr> {
     if cookie_ok && origin_ok {
         return Ok(());
     }
-    Err(ApiErr(StatusCode::UNAUTHORIZED, "not authorised (open the panel with `doum panel`)".into()))
+    Err(ApiErr(
+        StatusCode::UNAUTHORIZED,
+        "not authorised (open the panel with `doum panel`)".into(),
+    ))
 }
 
 fn lock(s: &Shared) -> std::sync::MutexGuard<'_, Daemon> {
@@ -975,7 +1007,10 @@ async fn h_login(AxState(s): AxState<Shared>, axum::extract::Query(q): axum::ext
         StatusCode::SEE_OTHER,
         [
             ("location", "/".to_string()),
-            ("set-cookie", format!("doum={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000", q.token)),
+            (
+                "set-cookie",
+                format!("doum={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000", q.token),
+            ),
         ],
     )
         .into_response()

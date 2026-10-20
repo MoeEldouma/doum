@@ -141,6 +141,8 @@ mod tests {
             detached: true,
             no_pause: false,
             owner: "t".into(),
+            no_hooks: false,
+            covers_pids: vec![],
             state,
             submitted_at: submitted,
             started_at: None,

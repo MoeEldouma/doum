@@ -88,7 +88,16 @@ mod tests {
     fn history_is_bounded() {
         let mut h = History::default();
         for t in 0..(KEEP as u64 + 5) {
-            h.push(Sample { t, used_shards: 0, mem_free_gb: 0.0, gpu_c: None, gpu_w: None, soc_c: None, running: 0, waiting: 0 });
+            h.push(Sample {
+                t,
+                used_shards: 0,
+                mem_free_gb: 0.0,
+                gpu_c: None,
+                gpu_w: None,
+                soc_c: None,
+                running: 0,
+                waiting: 0,
+            });
         }
         assert_eq!(h.since(0).len(), KEEP);
         assert_eq!(h.last().unwrap().t, KEEP as u64 + 4);

@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/doum"]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/MoeEldouma/doum"
+authors = ["Moe Eldouma"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

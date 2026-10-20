@@ -105,6 +105,9 @@ pub struct Job {
     #[serde(default)]
     pub progress: Progress,
     pub exit_code: Option<i32>,
+    /// GPU energy attributed to this job so far (joules): GPU power split between running jobs by shards.
+    #[serde(default)]
+    pub energy_j: f64,
     /// pid of the process group leader (detached) or of the `doum run` client (foreground).
     pub pid: Option<i32>,
     pub log: Option<String>,

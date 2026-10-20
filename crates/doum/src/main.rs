@@ -6,10 +6,12 @@ mod config;
 mod daemon;
 mod exec;
 mod job;
+mod metrics;
 mod notify;
 mod sched;
 mod store;
 mod sys;
+mod tui;
 
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
@@ -72,7 +74,7 @@ enum Cmd {
     /// Cancel a job (waiting or running).
     Cancel { id: u64 },
     /// Move a waiting job to the front of its lane.
-    Top { id: u64 },
+    Up { id: u64 },
     /// Answer a question (e.g. `doum answer 12 smart`).
     Answer { question: u64, choice: String },
     /// From inside a job: report progress, e.g. `doum progress "clip 2/5" --eta 5m`.
@@ -90,6 +92,10 @@ enum Cmd {
         #[arg(short, long)]
         follow: bool,
     },
+    /// Live terminal view with controls (like htop for the GPU queue).
+    Top,
+    /// Open the web panel in your browser (and unlock its controls).
+    Panel,
     /// Run the daemon (normally via `systemctl --user start doum`).
     Daemon,
     #[command(hide = true, name = "_exec")]
@@ -190,6 +196,14 @@ fn real_main(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Top => tui::run(&Client::new(&cfg, &paths)?),
+        Cmd::Panel => {
+            let token = std::fs::read_to_string(paths.token_file()).unwrap_or_default();
+            let url = format!("http://{}/login?token={}", cfg.listen, token.trim());
+            println!("opening http://{}/", cfg.listen);
+            std::process::Command::new("xdg-open").arg(&url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()?;
+            Ok(())
+        }
         Cmd::Pause { id } => simple(
             &cfg,
             &paths,
@@ -204,7 +218,7 @@ fn real_main(cli: Cli) -> Result<()> {
             json!({}),
             &format!("job {id}: cancelled"),
         ),
-        Cmd::Top { id } => simple(
+        Cmd::Up { id } => simple(
             &cfg,
             &paths,
             &format!("/api/jobs/{id}/top"),

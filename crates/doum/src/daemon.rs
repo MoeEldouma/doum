@@ -17,6 +17,7 @@ use std::time::Duration;
 use crate::config::{Config, Paths};
 use crate::exec;
 use crate::job::{now, Job, JobId, Lane, Mode, Progress, State};
+use crate::metrics::{self, History, Sample};
 use crate::notify::{Level, Notifier};
 use crate::sched::{self, Plan};
 use crate::store::{Decision, DecisionKind, Store};
@@ -34,6 +35,8 @@ pub struct Daemon {
     unmanaged_cache: Vec<sys::GpuProc>,
     last_gpu_scan: u64,
     last_prune: u64,
+    last_sample: u64,
+    pub history: History,
     dirty: bool,
 }
 
@@ -93,6 +96,8 @@ pub struct StatusView {
     pub queue: Vec<JobId>,
     pub decisions: Vec<Decision>,
     pub unmanaged: Vec<sys::GpuProc>,
+    #[serde(default)]
+    pub latest: Option<Sample>,
     pub now: u64,
 }
 
@@ -135,6 +140,8 @@ impl Daemon {
             unmanaged_cache: vec![],
             last_gpu_scan: 0,
             last_prune: 0,
+            last_sample: 0,
+            history: History::default(),
             dirty: true,
         })
     }
@@ -194,6 +201,7 @@ impl Daemon {
             max_wait_s: r.max_wait_s.unwrap_or(self.cfg.max_wait_s),
             progress: Progress::default(),
             exit_code: None,
+            energy_j: 0.0,
             pid: r.client_pid,
             log: None,
             reason: "queued".into(),
@@ -538,6 +546,9 @@ impl Daemon {
             self.last_gpu_scan = t;
             self.scan_unmanaged();
         }
+        if t.saturating_sub(self.last_sample) >= metrics::EVERY_S {
+            self.sample(t);
+        }
         if t.saturating_sub(self.last_prune) >= 3600 {
             self.last_prune = t;
             self.store.prune(t, 7 * 86400);
@@ -743,6 +754,33 @@ impl Daemon {
         }
     }
 
+    /// Record a history sample and attribute GPU energy to the running jobs.
+    fn sample(&mut self, t: u64) {
+        let dt = if self.last_sample == 0 { 0.0 } else { (t - self.last_sample) as f64 };
+        self.last_sample = t;
+        let (gpu_c, gpu_w) = metrics::gpu_temp_power();
+        let running: Vec<usize> = (0..self.store.jobs.len()).filter(|i| self.store.jobs[*i].state.holds_shards()).collect();
+        if let (Some(w), true) = (gpu_w, dt > 0.0 && dt < 120.0) {
+            let shards: Vec<u32> = running.iter().map(|i| self.store.jobs[*i].shards).collect();
+            for (k, e) in metrics::split_energy(&shards, w, dt).into_iter().enumerate() {
+                self.store.jobs[running[k]].energy_j += e;
+            }
+            if !running.is_empty() {
+                self.dirty = true;
+            }
+        }
+        self.history.push(Sample {
+            t,
+            used_shards: sched::used_shards(&self.store.jobs),
+            mem_free_gb: (sys::mem_available_gb() * 10.0).round() / 10.0,
+            gpu_c,
+            gpu_w,
+            soc_c: metrics::soc_temp().map(|c| (c * 10.0).round() / 10.0),
+            running: running.len() as u32,
+            waiting: self.store.jobs.iter().filter(|j| j.state == State::Pending).count() as u32,
+        });
+    }
+
     /// GPU processes that are not part of any doum job (they bypass the queue). Alert once per process.
     fn scan_unmanaged(&mut self) {
         let procs = self.unmanaged();
@@ -787,6 +825,7 @@ impl Daemon {
             queue: sched::order(&self.store.jobs).iter().map(|j| j.id).collect(),
             decisions: self.store.open_decisions().cloned().collect(),
             unmanaged: self.unmanaged_cache.clone(),
+            latest: self.history.last().cloned(),
             now: now(),
         }
     }
@@ -836,11 +875,26 @@ impl IntoResponse for ApiErr {
 }
 type ApiResult<T> = std::result::Result<Json<T>, ApiErr>;
 
+/// Mutating calls need the token: as the `x-doum-token` header (CLI, MCP, jobs) or as the panel's cookie
+/// (set by /login, HttpOnly + SameSite=Strict, and the request's Origin must be this server).
 fn authed(d: &Daemon, h: &HeaderMap) -> Result<(), ApiErr> {
-    match h.get("x-doum-token").and_then(|v| v.to_str().ok()) {
-        Some(t) if t == d.token => Ok(()),
-        _ => Err(ApiErr(StatusCode::UNAUTHORIZED, "missing or wrong x-doum-token".into())),
+    if h.get("x-doum-token").and_then(|v| v.to_str().ok()) == Some(d.token.as_str()) {
+        return Ok(());
     }
+    let cookie_ok = h
+        .get_all("cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .any(|c| c.trim() == format!("doum={}", d.token));
+    let origin_ok = match h.get("origin").and_then(|v| v.to_str().ok()) {
+        None => true,
+        Some(o) => o == d.api || o == d.api.replace("127.0.0.1", "localhost"),
+    };
+    if cookie_ok && origin_ok {
+        return Ok(());
+    }
+    Err(ApiErr(StatusCode::UNAUTHORIZED, "not authorised (open the panel with `doum panel`)".into()))
 }
 
 fn lock(s: &Shared) -> std::sync::MutexGuard<'_, Daemon> {
@@ -904,13 +958,45 @@ async fn h_answer(
     act!(s, h, |d: &mut Daemon| d.answer(id, &r.choice))
 }
 async fn h_index() -> Html<&'static str> {
-    Html("<!doctype html><title>doum</title><p>doum is running. API: <a href=/api/status>/api/status</a>. The panel arrives in milestone 5.</p>")
+    Html(include_str!("panel.html"))
+}
+
+#[derive(Deserialize)]
+struct LoginQ {
+    token: String,
+}
+/// `doum panel` opens /login?token=… once; the token becomes an HttpOnly, SameSite=Strict cookie.
+async fn h_login(AxState(s): AxState<Shared>, axum::extract::Query(q): axum::extract::Query<LoginQ>) -> Response {
+    let ok = q.token == lock(&s).token;
+    if !ok {
+        return (StatusCode::UNAUTHORIZED, "wrong token").into_response();
+    }
+    (
+        StatusCode::SEE_OTHER,
+        [
+            ("location", "/".to_string()),
+            ("set-cookie", format!("doum={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000", q.token)),
+        ],
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+struct MetricsQ {
+    #[serde(default)]
+    minutes: Option<u64>,
+}
+async fn h_metrics(AxState(s): AxState<Shared>, axum::extract::Query(q): axum::extract::Query<MetricsQ>) -> Json<Vec<Sample>> {
+    let since = now().saturating_sub(q.minutes.unwrap_or(60) * 60);
+    Json(lock(&s).history.since(since))
 }
 
 pub fn router(s: Shared) -> Router {
     Router::new()
         .route("/", get(h_index))
+        .route("/login", get(h_login))
         .route("/api/status", get(h_status))
+        .route("/api/metrics", get(h_metrics))
         .route("/api/jobs", post(h_submit))
         .route("/api/jobs/{id}", get(h_job))
         .route("/api/jobs/{id}/pause", post(h_pause))

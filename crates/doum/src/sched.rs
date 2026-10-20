@@ -153,6 +153,7 @@ mod tests {
             max_wait_s: 0,
             progress: Progress::default(),
             exit_code: None,
+            energy_j: 0.0,
             pid: None,
             log: None,
             reason: String::new(),

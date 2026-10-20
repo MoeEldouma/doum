@@ -669,7 +669,10 @@ impl Daemon {
                     }
                     State::Failed => self.notifier.alert(
                         &format!("doum: '{name}' failed"),
-                        &format!("exit code {}; see its log: doum logs {id}", code.map_or_else(|| "unknown".to_string(), |c| c.to_string())),
+                        &format!(
+                            "exit code {}; see its log: doum logs {id}",
+                            code.map_or_else(|| "unknown".to_string(), |c| c.to_string())
+                        ),
                         Level::Warn,
                     ),
                     _ => {}

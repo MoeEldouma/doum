@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in doum. Bug reports, fixes and reports from hardware other than a GB10 are all welcome.
+Thanks for your interest in Doum. Bug reports, fixes and reports from hardware other than a GB10 are all welcome.
 
 ## Build and test
 
@@ -52,4 +52,4 @@ public issue; contact the maintainer through GitHub first.
 - If you change behaviour, a flag, a config key or a default, update `docs/` (and `docs/config.example.toml`) and add
   a line to `CHANGELOG.md`.
 
-By contributing you agree that your contribution is licensed under the Apache License 2.0, like the rest of doum.
+By contributing you agree that your contribution is licensed under the Apache License 2.0, like the rest of Doum.

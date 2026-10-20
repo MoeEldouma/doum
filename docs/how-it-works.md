@@ -1,11 +1,11 @@
 # How it works
 
-This page describes what the code does, so you can predict what doum will do. The scheduling rules live in
+This page describes what the code does, so you can predict what Doum will do. The scheduling rules live in
 `crates/doum/src/sched.rs` as pure functions with unit tests; the daemon (`daemon.rs`) runs them once a second.
 
 ## Shards
 
-doum does not measure GPU memory per job. Each job *says* how many shards it needs (`--shards`, about 1 GB each), and
+Doum does not measure GPU memory per job. Each job *says* how many shards it needs (`--shards`, about 1 GB each), and
 the daemon makes sure the shards of all running jobs never add up to more than `total_shards` (110 by default). A job
 that asks for more than the total is lowered to the total. Whether a job really stays within its shards is up to the
 job; the [free-memory check](#pre-start-checks) and [unmanaged-process detection](#unmanaged-gpu-processes) are
@@ -116,13 +116,13 @@ The steps and their results are written to the job's log as lines starting with 
 ## Unmanaged GPU processes
 
 Every 15 s the daemon runs `nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory`. A process counts as
-part of a doum job if it is in a running job's process group (the runner's or the command's), descends from the job's
+part of a Doum job if it is in a running job's process group (the runner's or the command's), descends from the job's
 process, or descends from one of the job's `--covers-pid` processes. Everything else that uses at least
 `unmanaged_min_gb` is listed under "outside the queue" in `doum status`, `doum top`, the panel and the metrics, and
 triggers one alert per process (again only if it disappears and comes back).
 
 On unified memory `nvidia-smi` reports no per-process memory, so the process's resident memory (`VmRSS`) is used
-instead. Without `nvidia-smi` this feature is off. doum only reports these processes; it never stops them.
+instead. Without `nvidia-smi` this feature is off. Doum only reports these processes; it never stops them.
 
 ## Energy accounting
 
@@ -156,7 +156,7 @@ The in-memory history for the charts is not saved and starts empty after a resta
 
 ## Security model
 
-doum is built for one user on one machine.
+Doum is built for one user on one machine.
 
 - **Loopback only.** The daemon listens on `127.0.0.1:8420` by default, and `listen` must be a loopback address
   (`127.0.0.1` or `::1`); with anything else the daemon refuses to start. Nothing on the network can reach it.
@@ -198,17 +198,17 @@ doum is built for one user on one machine.
 | `POST /api/jobs/<id>/done` | yes | A foreground client reports its exit code. |
 | `POST /api/decisions/<id>` | yes | Answer a question: `{"choice": "smart"}`. |
 
-The API is internal to doum and may change before 1.0. `doum status --json` prints the status object.
+The API is internal to Doum and may change before 1.0. `doum status --json` prints the status object.
 
 ## Slurm (experimental preview)
 
-`deploy/slurm/` holds a single-node Slurm setup that mirrors doum's model: a generic resource `shard` with a count of
+`deploy/slurm/` holds a single-node Slurm setup that mirrors Doum's model: a generic resource `shard` with a count of
 110 on the GPU, an `interactive` partition that is always considered before `batch`, strict priority order,
 requeueable batch jobs with a 90 s `KillWait` to save a checkpoint, and cgroup v2 for process tracking only.
 `deploy/slurm/install.sh` installs MUNGE and Slurm from the Ubuntu 24.04 packages (Slurm 23.11), writes this config
 (backing up any existing one), starts the services and runs a one-shard test job; `uninstall.sh` removes them.
 
-This is a preview for people who already run Slurm. **The doum CLI and daemon do not submit to Slurm yet**: there is
+This is a preview for people who already run Slurm. **The Doum CLI and daemon do not submit to Slurm yet**: there is
 no setting for it, and jobs submitted with `doum run` always go to the native queue. The install script runs its test
 job as the user who called `sudo` (or the login user). The scripts change system packages and services and need root.
 Read them before running them.

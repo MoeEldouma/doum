@@ -1,6 +1,6 @@
 # The demo GIF
 
-`docs/demo.gif` is recorded from a throwaway doum daemon running harmless CPU jobs (no GPU is used):
+`docs/demo.gif` is recorded from a throwaway Doum daemon running harmless CPU jobs (no GPU is used):
 `render.sh` stands in for a ComfyUI render, `train.sh` for a training run that saves a checkpoint when paused and
 resumes from it, `writer.sh` for an LLM someone is waiting for.
 
@@ -33,5 +33,5 @@ ffmpeg -framerate 8 -i frames/f%04d.png -vf "scale=1000:-1:flags=lanczos,split[a
 
 # The phone alerts images
 
-`docs/media/phone-alerts.{gif,png}` are rendered from `phone.html` (an illustration using doum's real alert text):
+`docs/media/phone-alerts.{gif,png}` are rendered from `phone.html` (an illustration using Doum's real alert text):
 open it in Playwright at 1200x860, call `all()` for the still or `play(1300)` and capture frames for the GIF.

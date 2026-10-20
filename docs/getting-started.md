@@ -4,15 +4,15 @@ This guide takes you from install to running, pausing and resuming your own GPU 
 
 ## Requirements
 
-- Linux (x86_64 or aarch64). doum reads `/proc` for memory and process information.
+- Linux (x86_64 or aarch64). Doum reads `/proc` for memory and process information.
 - An NVIDIA GPU with `nvidia-smi` on the `PATH` is optional but recommended. Without it, the queue still works (it
-  only counts shards), but doum cannot see GPU processes outside the queue and has no temperature, power or energy
+  only counts shards), but Doum cannot see GPU processes outside the queue and has no temperature, power or energy
   numbers.
 - For desktop pop-ups: a desktop session with a notification daemon (D-Bus). Answer buttons need a notification
   daemon that supports actions (GNOME's does).
 - `xdg-open` for `doum panel`, `tail` for `doum logs`.
 
-doum was built on an NVIDIA GB10 with 128 GB of unified memory. On a discrete-memory GPU, set `total_shards` to your
+Doum was built on an NVIDIA GB10 with 128 GB of unified memory. On a discrete-memory GPU, set `total_shards` to your
 VRAM in GB and read the note on the memory check in [Configuration](configuration.md#memory).
 
 ## Install
@@ -126,10 +126,10 @@ Options:
 Notes on the less obvious ones:
 
 - `--name` defaults to the file name of the command (`python` for `python generate.py`), so naming jobs pays off.
-- `--mem` is only used by the free-memory check. If you leave it out, doum uses `shards × gb_per_shard`, capped at
+- `--mem` is only used by the free-memory check. If you leave it out, Doum uses `shards × gb_per_shard`, capped at
   60% of the whole budget.
 - `--no-hooks` skips the free-memory check, the ComfyUI unload and your `pre_start` / `post_end` hooks.
-- `--covers-pid` tells doum that this job stands for another process (a server that holds the GPU on the job's
+- `--covers-pid` tells Doum that this job stands for another process (a server that holds the GPU on the job's
   behalf). That process is not reported as "outside the queue", and when every covered process has exited, the job is
   cancelled so its shards are not held forever. The ComfyUI plugin uses this.
 - `--max-wait` overrides `max_wait_s` for this job (`20m`, `1h`, `90s`; `0` turns the check-back off).
@@ -222,7 +222,7 @@ The training (2 h left) is paused, the render (5 min left) finishes, and the wri
 
 ### ask
 
-Ask you. doum opens a question with the three choices above and time estimates for each:
+Ask you. Doum opens a question with the three choices above and time estimates for each:
 
 - a desktop pop-up with **Smart / Wait / Pause now** buttons (Smart is marked "recommended"),
 - a phone push and webhooks, if configured,
@@ -237,19 +237,19 @@ If nobody answers within `ask_timeout_s` (60 s), the recommendation (smart) is a
 the job is held, and it also holds up the jobs behind it.
 
 The plan (who to pause, who to wait for) is made once: when the job is submitted, or when the question is answered.
-If a job you let finish runs longer than it said, doum does not re-plan by itself; the check-back below catches that.
+If a job you let finish runs longer than it said, Doum does not re-plan by itself; the check-back below catches that.
 
 ### Check-back
 
 An interactive-lane job, or any foreground job, that is still waiting after `max_wait_s` (20 min by default, or its
 `--max-wait`) gets a second question: **pause-now**, **keep-waiting** or **cancel**. It stays open for at least 5
-minutes; no answer means keep-waiting. If the job is still waiting another `max_wait_s` later, doum asks again. Batch
+minutes; no answer means keep-waiting. If the job is still waiting another `max_wait_s` later, Doum asks again. Batch
 jobs waiting in line are normal and never get this question.
 
 ## Writing a pausable job
 
 A detached job can be paused at any time (unless it opted out). Pausing sends SIGTERM to the job's process group,
-gives it `pause_grace_s` seconds (90 s) to save and exit, then sends SIGKILL. Later doum runs the **same command again**
+gives it `pause_grace_s` seconds (90 s) to save and exit, then sends SIGKILL. Later Doum runs the **same command again**
 from the start: same directory, same environment, same `DOUM_JOB_ID`. The exit code of a paused attempt is ignored.
 
 So a pausable job needs to:
@@ -323,7 +323,7 @@ Options:
       --no-pause   From now on, do not pause this job
 ```
 
-It works only inside a job started by doum (it reads `DOUM_JOB_ID`). `--eta` takes durations such as `90s`, `5m`,
+It works only inside a job started by Doum (it reads `DOUM_JOB_ID`). `--eta` takes durations such as `90s`, `5m`,
 `2h`, `1h 30m`. The ETA is counted down from the moment of the report, so a job that reports once an epoch still has a
 sensible "time left" between reports. The message and time left show in `doum status`, `doum top`, the panel and in
 `ask` questions.
@@ -343,7 +343,7 @@ doum answer 12 smart   # answer question 12
 ```
 
 - `doum logs` works only for detached jobs; logs are in `~/.local/state/doum/logs/<id>-<name>.log`. Lines starting
-  with `[doum]` come from doum itself (the pre-start checks, the start and the exit code).
+  with `[doum]` come from Doum itself (the pre-start checks, the start and the exit code).
 - `doum pause` on a foreground job is refused ("foreground jobs cannot be paused (cancel instead)").
 - `doum cancel` on a running background job sends SIGTERM, and SIGKILL if it is still running after
   `pause_grace_s` (90 s). The job is marked cancelled when it has exited. A running foreground job gets SIGTERM only

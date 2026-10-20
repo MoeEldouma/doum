@@ -165,7 +165,7 @@ fn draw(f: &mut Frame, app: &mut App) {
 
     // title line
     let mut title = vec![
-        Span::styled(" doum ", Style::default().fg(Color::Black).bg(PALM).add_modifier(Modifier::BOLD)),
+        Span::styled(" Doum ", Style::default().fg(Color::Black).bg(PALM).add_modifier(Modifier::BOLD)),
         Span::raw(format!("  {:.0} GB memory free", s.mem_available_gb)),
     ];
     if let Some(l) = &s.latest {

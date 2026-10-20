@@ -1,7 +1,7 @@
 # Changelog
 
-All notable changes to doum are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and doum uses [Semantic Versioning](https://semver.org/).
+All notable changes to Doum are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and Doum uses [Semantic Versioning](https://semver.org/).
 
 ## v0.1.0 (unreleased)
 
@@ -37,7 +37,7 @@ First public release. Linux only; tested on one NVIDIA GB10 (128 GB unified memo
   escape; `gpu-share` skill for Claude Code.
 - ComfyUI gate plugin (`integrations/comfyui/doum_gate`): leases, progress reports, idle release, stop handshake,
   re-queue of the interrupted prompt, orphaned-lease cleanup.
-- llama-swap integration example: model servers started on demand as interactive doum jobs.
+- llama-swap integration example: model servers started on demand as interactive Doum jobs.
 - Prometheus metrics at `GET /metrics`.
 - State persisted to disk; detached jobs keep running through a daemon restart, including
   `systemctl --user restart doum` (the unit uses `KillMode=process`), and are picked up again.

@@ -1,7 +1,7 @@
 # Integrations
 
 - [ComfyUI](#comfyui): every prompt waits its turn
-- [llama-swap](#llama-swap): local LLMs start on demand as doum jobs
+- [llama-swap](#llama-swap): local LLMs start on demand as Doum jobs
 - [Claude Code](#claude-code): MCP tools for agents, a PreToolUse hook, a skill
 - [Prometheus and Grafana](#prometheus-and-grafana)
 - [Notifications](#notifications): desktop, ntfy, webhooks
@@ -11,7 +11,7 @@ The files referred to below are in the repository and in every release archive.
 ## ComfyUI
 
 `integrations/comfyui/doum_gate` is a ComfyUI custom node package (it adds no nodes). With it, every ComfyUI prompt,
-from the UI or from any script posting to `/prompt`, waits for the GPU in the doum queue.
+from the UI or from any script posting to `/prompt`, waits for the GPU in the Doum queue.
 
 ### Install
 
@@ -33,32 +33,32 @@ Environment variables of the ComfyUI process:
 |---|---|---|
 | `DOUM_COMFY_SHARDS` | `60` | Shards ComfyUI asks for while it has work. |
 | `DOUM_COMFY_IDLE_S` | `90` | Seconds with an empty queue before ComfyUI unloads its models and releases the GPU. |
-| `DOUM_BIN` | `~/.local/bin/doum` | The doum binary. If it does not exist the plugin stays inactive. |
+| `DOUM_BIN` | `~/.local/bin/doum` | The Doum binary. If it does not exist the plugin stays inactive. |
 | `DOUM_API` | `http://127.0.0.1:8420` | The daemon's address. |
-| `DOUM_STATE_DIR` | `~/.local/state/doum` | doum's state directory, if you moved it. The plugin reads the token from it and keeps its handshake flag files in its `comfyui/` folder. |
+| `DOUM_STATE_DIR` | `~/.local/state/doum` | Doum's state directory, if you moved it. The plugin reads the token from it and keeps its handshake flag files in its `comfyui/` folder. |
 | `DOUM_TOKEN_FILE` | `$DOUM_STATE_DIR/token` | The API token file, if it is somewhere else. |
 | `DOUM_COMFY_URL` | `http://127.0.0.1:8188` | ComfyUI's own address (used to wait for startup and to re-queue prompts). |
 
 ### What it does
 
-- **Lease.** Before a prompt runs, the plugin makes sure ComfyUI holds a *lease*: a detached doum job named
+- **Lease.** Before a prompt runs, the plugin makes sure ComfyUI holds a *lease*: a detached Doum job named
   `comfyui` of `DOUM_COMFY_SHARDS` shards. The lease is a small holder process that only sleeps; it is submitted with
-  `--no-hooks --mem 0` (ComfyUI manages its own memory, so doum's pre-start checks and your hooks do not run for it)
+  `--no-hooks --mem 0` (ComfyUI manages its own memory, so Doum's pre-start checks and your hooks do not run for it)
   and `--covers-pid <ComfyUI's pid>`, so ComfyUI's own GPU use is not reported as outside the queue. If the GPU is
   busy, the prompt waits (and in `ask` mode you get the usual question). Later prompts reuse the lease.
 - **Progress.** While prompts run, the plugin reports `rendering (N more queued)` and an ETA based on the average of
   the last five prompt durations, so smart decisions know how long ComfyUI still needs.
 - **Idle release.** After `DOUM_COMFY_IDLE_S` seconds with an empty queue, ComfyUI unloads its models and cancels the
   lease, which frees the shards. While idle with a lease it reports `idle, releasing the GPU in Ns`.
-- **Stop handshake.** When doum pauses the lease, the plugin interrupts the running prompt, unloads the models, and
+- **Stop handshake.** When Doum pauses the lease, the plugin interrupts the running prompt, unloads the models, and
   only then writes a flag file that lets the holder process exit. So the next job does not start until ComfyUI has
-  actually let go of the memory. (The holder waits for the flag for up to 120 s; doum's `pause_grace_s` still applies
+  actually let go of the memory. (The holder waits for the flag for up to 120 s; Doum's `pause_grace_s` still applies
   and kills it after 90 s by default.) If the lease is paused while ComfyUI is idle, it simply releases it.
-- **Re-queue.** The interrupted prompt is sent back to ComfyUI's queue at the front. The lease goes back to the doum
+- **Re-queue.** The interrupted prompt is sent back to ComfyUI's queue at the front. The lease goes back to the Doum
   queue as a paused job, and ComfyUI carries on when it gets the GPU again.
 - **Orphaned lease cleanup.** If ComfyUI exits or crashes while holding a lease, the daemon notices that the covered
   process is gone and cancels the lease.
-- **doum not running.** Prompts run without the queue, exactly as without the plugin.
+- **Doum not running.** Prompts run without the queue, exactly as without the plugin.
 
 ### Known limits
 
@@ -66,12 +66,12 @@ Environment variables of the ComfyUI process:
   the GPU) runs before the re-queued prompt.
 - The interrupted prompt starts again from the beginning; ComfyUI has no way to resume a half-finished prompt.
 - The lease covers all of ComfyUI at a fixed size. A workflow that needs more memory than `DOUM_COMFY_SHARDS` is not
-  stopped by doum.
+  stopped by Doum.
 
 ## llama-swap
 
 [llama-swap](https://github.com/mostlygeek/llama-swap) is a proxy that starts a model server when a request for that
-model arrives and stops it after it has been idle. With doum, each model server is started through `doum run`, so a
+model arrives and stops it after it has been idle. With Doum, each model server is started through `doum run`, so a
 model load waits for the GPU like any other job.
 
 The example config is `integrations/llama-swap/config.example.yaml`. The important part is the model's `cmd`:
@@ -86,12 +86,12 @@ models:
     ttl: 300
 ```
 
-How a model becomes a doum job:
+How a model becomes a Doum job:
 
 1. A request for `qwen3.6-35b` reaches llama-swap. It runs the `cmd`.
 2. `doum run --interactive` submits a **foreground** job in the interactive lane, so it starts before batch work. With
    your `default_mode`, it may pause batch jobs, ask you, or wait.
-3. When the job starts, doum runs the pre-start checks (memory, your hooks) and then the model server (here
+3. When the job starts, Doum runs the pre-start checks (memory, your hooks) and then the model server (here
    `ollama serve` on llama-swap's port). llama-swap waits for `checkEndpoint` to answer, up to `healthCheckTimeout`
    (1500 s in the example, long enough to cover a wait in the queue up to the 20-minute check-back plus the load).
 4. After `ttl` seconds without requests, llama-swap stops the server. `doum run` passes the stop signal on, the server
@@ -100,7 +100,7 @@ How a model becomes a doum job:
 
 Notes:
 
-- Model jobs are foreground jobs, so doum never pauses them; they leave when idle.
+- Model jobs are foreground jobs, so Doum never pauses them; they leave when idle.
 - `--shards` is the GPU budget for the model; `--mem` is what it really uses, for the free-memory check.
 - The example runs one Ollama server per model through the `ollama` macro; llama.cpp's `llama-server` or any other
   OpenAI-compatible server works the same way.
@@ -143,7 +143,7 @@ the MCP tools; they are not a sandbox. An agent with a shell can still run `doum
 `[claude_hook] gpu_patterns` (by default: `ollama run|serve`, `llama-server|cli|bench`, `vllm serve`,
 `sglang.launch_server`, `basert bench|serve|...`, `torchrun`, `accelerate launch`, and `python ...` running a script
 whose name contains train, finetune, infer, inference, generate or render), it returns a "deny" decision with a
-reason that tells Claude to use the doum MCP tools or `doum run`. Everything else passes.
+reason that tells Claude to use the Doum MCP tools or `doum run`. Everything else passes.
 
 Add it to `~/.claude/settings.json`:
 
@@ -244,7 +244,7 @@ daemon needs access to your D-Bus session bus, which a systemd user service norm
 ### ntfy
 
 Set `ntfy_url` to a topic URL, for example `https://ntfy.sh/doum-3f9c1a7e52b04d6e`, and subscribe to that topic in
-the ntfy app. doum POSTs the message text with the headers `Title`, `Priority` (`default` for info, `high` for warn)
+the ntfy app. Doum POSTs the message text with the headers `Title`, `Priority` (`default` for info, `high` for warn)
 and `Tags` (`question` or `gpu`).
 
 On a public ntfy server, anyone who knows or guesses the topic name can read your messages (job names, what is

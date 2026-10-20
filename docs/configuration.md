@@ -1,6 +1,6 @@
 # Configuration
 
-doum reads one TOML file: `~/.config/doum/doum.toml` (more precisely `$XDG_CONFIG_HOME/doum/doum.toml`), or the path
+Doum reads one TOML file: `~/.config/doum/doum.toml` (more precisely `$XDG_CONFIG_HOME/doum/doum.toml`), or the path
 in `DOUM_CONFIG`. The file is optional and every key in it is optional: a missing key keeps its default. An empty file
 and no file at all give the same result.
 
@@ -8,7 +8,7 @@ and no file at all give the same result.
   background jobs keep running through the restart (see [restarts](how-it-works.md#restarts)).
 - The CLI and the MCP server read the same file too (for `listen` and, in the MCP server, the `[mcp]` limits).
 - Unknown keys are ignored without a warning, so check the spelling. A file that is not valid TOML, or a value of the
-  wrong type, makes every doum command fail with a parse error that names the file.
+  wrong type, makes every Doum command fail with a parse error that names the file.
 - A list setting (for example `claude_hook.gpu_patterns`) replaces the default list; it is not merged with it.
 
 A commented example with every key is in [`config.example.toml`](config.example.toml).
@@ -105,7 +105,7 @@ Patterns for `doum claude-hook`, the Claude Code PreToolUse hook.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `gpu_patterns` | list of strings | see below | Case-insensitive regular expressions (Rust `regex` syntax). A Bash command that matches one of them is blocked unless it goes through doum. Patterns that do not compile are skipped. Setting this replaces the whole default list. |
+| `gpu_patterns` | list of strings | see below | Case-insensitive regular expressions (Rust `regex` syntax). A Bash command that matches one of them is blocked unless it goes through Doum. Patterns that do not compile are skipped. Setting this replaces the whole default list. |
 | `hint` | string | `""` | Extra text added to the hook's message when it blocks a command, for example where local LLMs are served on your machine. Empty adds nothing. |
 
 The defaults:
@@ -131,13 +131,13 @@ Read by the `doum` binary:
 | Variable | Meaning |
 |---|---|
 | `DOUM_CONFIG` | Path of the config file, instead of `~/.config/doum/doum.toml`. |
-| `DOUM_STATE_DIR` | State directory, instead of `~/.local/state/doum` (`$XDG_STATE_HOME/doum`). Holds `state.json`, `token`, `logs/` and `exit/`. Created if missing, and set to mode 0700 by every doum command. |
+| `DOUM_STATE_DIR` | State directory, instead of `~/.local/state/doum` (`$XDG_STATE_HOME/doum`). Holds `state.json`, `token`, `logs/` and `exit/`. Created if missing, and set to mode 0700 by every Doum command. |
 | `DOUM_API` | Base URL of the daemon for the CLI and MCP server (e.g. `http://127.0.0.1:8420`), instead of `http://<listen>`. |
 | `DOUM_TOKEN` | API token for the CLI and MCP server, instead of reading `<state dir>/token`. |
-| `DOUM_JOB_ID` | Set by doum inside every job. `doum progress` requires it. |
+| `DOUM_JOB_ID` | Set by Doum inside every job. `doum progress` requires it. |
 | `RUST_LOG` | Log filter for `doum daemon` (default `doum=info`). |
 
-doum sets `DOUM_JOB_ID`, `DOUM_API`, `DOUM_TOKEN`, `DOUM_CONFIG` and `DOUM_STATE_DIR` in every detached job, and strips
+Doum sets `DOUM_JOB_ID`, `DOUM_API`, `DOUM_TOKEN`, `DOUM_CONFIG` and `DOUM_STATE_DIR` in every detached job, and strips
 any `DOUM_*` variables from the environment it captures when you run `doum run`.
 
 Read by the ComfyUI plugin (in ComfyUI's environment): `DOUM_BIN`, `DOUM_API`, `DOUM_STATE_DIR`, `DOUM_TOKEN_FILE`,

@@ -1,4 +1,4 @@
-# Using doum with Claude Code (or any MCP client)
+# Using Doum with Claude Code (or any MCP client)
 
 1. MCP tools for every session:
    `claude mcp add --scope user doum -- doum mcp`

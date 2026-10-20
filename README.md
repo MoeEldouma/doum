@@ -18,15 +18,20 @@ then the training resumes from its checkpoint. Recorded with stand-in CPU jobs (
 > 128 GB unified memory). It should work on other NVIDIA Linux boxes, but nobody has tried yet. See
 > [Status and roadmap](#status-and-roadmap).
 
-## Why
+## Why I built this
 
-You run ComfyUI renders, a local LLM, a fine-tune and maybe an agent or two on one GPU. Start two heavy things at once
-and one of them crashes with out-of-memory. On unified-memory machines it can be worse: the whole box can lock up or
-power off at a model-load peak. ComfyUI queues its own work and Ollama queues its own work, but nothing queues
-*across* them.
+I run everything on one NVIDIA DGX Spark: local LLMs, ComfyUI image and video models, and text-to-speech model
+training. Each one assumes it has the GPU to itself. So every switch meant closing one session, checking the GPU was
+really empty, and only then starting the next.
 
-Doum is that cross-app queue. It is one binary: a daemon on `127.0.0.1:8420`, a CLI, a terminal UI, a web panel and
-an MCP server.
+When I got it wrong, something ran out of memory. Worse, the machine powered off without warning, three times; the
+system logs traced each one to a model-load peak.
+
+Doum is the tool I wanted instead of that routine. Every job waits its turn, long jobs step aside for urgent ones and
+come back on their own, and my phone tells me when a decision is mine.
+
+ComfyUI queues its own work and Ollama queues its own work, but nothing queues *across* them. Doum is that cross-app
+queue: one binary with a daemon on `127.0.0.1:8420`, a CLI, a terminal UI, a web panel and an MCP server.
 
 ## What it does
 

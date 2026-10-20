@@ -1,5 +1,5 @@
 # Example llama-swap config for doum: one local OpenAI-compatible address for local models, http://127.0.0.1:8410/v1
-# Each model server starts as a doum job (waits its turn for the GPU, passes the gb10-guard gate) and is
+# Each model server starts as a doum job (waits its turn for the GPU, passes your pre_start checks) and is
 # unloaded + stopped after `ttl` seconds idle, which ends the doum job and frees its shards.
 
 # Covers waiting in the GPU queue (up to doum's 20-min check-back) plus loading.
@@ -15,8 +15,8 @@ macros:
 
 models:
   "gpt-oss-120b":
-    name: "gpt-oss 120B (writer)"
-    description: "Main writer: resumes, cover letters. Takes the whole GPU while loaded."
+    name: "gpt-oss 120B"
+    description: "Large general model. Takes the whole GPU while loaded."
     cmd: doum run --interactive --shards 110 --mem 72 --name llm-gpt-oss-120b -- ${ollama}
     proxy: http://127.0.0.1:${PORT}
     checkEndpoint: /v1/models

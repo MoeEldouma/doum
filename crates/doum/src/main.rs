@@ -5,7 +5,9 @@ mod client;
 mod config;
 mod daemon;
 mod exec;
+mod hook;
 mod job;
+mod mcp;
 mod metrics;
 mod notify;
 mod sched;
@@ -96,6 +98,11 @@ enum Cmd {
     Top,
     /// Open the web panel in your browser (and unlock its controls).
     Panel,
+    /// MCP server on stdio, for AI agents (e.g. `claude mcp add doum -- doum mcp`).
+    Mcp,
+    /// Claude Code PreToolUse hook: blocks shell commands that start GPU work outside the queue.
+    #[command(name = "claude-hook")]
+    ClaudeHook,
     /// Run the daemon (normally via `systemctl --user start doum`).
     Daemon,
     #[command(hide = true, name = "_exec")]
@@ -197,6 +204,8 @@ fn real_main(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Top => tui::run(&Client::new(&cfg, &paths)?),
+        Cmd::Mcp => mcp::serve(cfg, paths),
+        Cmd::ClaudeHook => std::process::exit(hook::run(&cfg.claude_hook)),
         Cmd::Panel => {
             let token = std::fs::read_to_string(paths.token_file()).unwrap_or_default();
             let url = format!("http://{}/login?token={}", cfg.listen, token.trim());

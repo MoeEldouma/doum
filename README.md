@@ -77,8 +77,8 @@ The scheduling rules are pure functions with unit tests (`crates/doum/src/sched.
 - [x] systemd user service
 - [x] llama-swap integration: local LLMs started on demand as doum jobs, unloaded when idle
       (tested on a GB10: gpt-oss-120b loads + answers in 37 s, 37 tok/s warm; memory fully returned on unload)
-- [ ] `doum top` (terminal UI) and a web panel with history charts
-- [ ] MCP server for AI agents (with per-agent budgets)
+- [x] `doum top` (terminal UI) and a web panel with history charts and energy per job
+- [x] MCP server for AI agents (agent-safe limits) + Claude Code skill and hook
 - [ ] ComfyUI gate plugin (each render waits its turn; queue saved and restored on pause)
 - [ ] Slurm backend
 - [ ] Prometheus metrics, docs site, packages, v0.1.0

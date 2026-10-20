@@ -29,6 +29,8 @@ pub struct Config {
     pub hooks: Hooks,
     pub notify: NotifyCfg,
     pub comfyui: ComfyCfg,
+    pub mcp: McpCfg,
+    pub claude_hook: ClaudeHookCfg,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +68,57 @@ pub struct ComfyCfg {
     pub free_when_idle: bool,
 }
 
+/// Limits for AI agents using the MCP tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpCfg {
+    /// Largest job an agent may submit, in shards.
+    pub max_shards: u32,
+    /// How many unfinished jobs agents may have at once.
+    pub max_jobs: u32,
+    /// What an agent's job does when the GPU is busy. `wait` never pauses anyone else's work.
+    pub mode: Mode,
+    /// Let agents pause / cancel jobs they did not start.
+    pub allow_control_others: bool,
+    /// Let agents answer the user's GPU questions.
+    pub allow_answer: bool,
+}
+
+impl Default for McpCfg {
+    fn default() -> Self {
+        Self { max_shards: 60, max_jobs: 2, mode: Mode::Wait, allow_control_others: false, allow_answer: false }
+    }
+}
+
+/// `doum claude-hook`: a Claude Code PreToolUse hook that stops shell commands which would start GPU work
+/// outside the queue. Patterns are case-insensitive regular expressions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClaudeHookCfg {
+    pub gpu_patterns: Vec<String>,
+}
+
+impl Default for ClaudeHookCfg {
+    fn default() -> Self {
+        Self {
+            gpu_patterns: [
+                r"\bollama\s+(run|serve)\b",
+                r"\bllama-(server|cli|bench)\b",
+                r"\bvllm\s+serve\b",
+                r"\bsglang\.launch_server\b",
+                r"\bbasert\s+(bench|serve|chat|run|complete)\b",
+                r"\btorchrun\b",
+                r"\baccelerate\s+launch\b",
+                r"\bpython[0-9.]*\s+[^|;&]*\b[\w-]*(train|finetune|fine_tune|infer|inference|generate|render)[\w-]*\.py\b",
+                r"(127\.0\.0\.1|localhost):8188/(api/)?prompt\b",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -81,6 +134,8 @@ impl Default for Config {
             hooks: Hooks::default(),
             notify: NotifyCfg::default(),
             comfyui: ComfyCfg::default(),
+            mcp: McpCfg::default(),
+            claude_hook: ClaudeHookCfg::default(),
         }
     }
 }

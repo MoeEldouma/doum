@@ -208,6 +208,9 @@ def _watch():
                     _release("paused while idle")  # unload, confirm, and don't keep a requeued lease with nothing to do
                 elif time.time() - _state["last_activity"] > IDLE_S and _remaining() == 0:
                     _release(f"idle {IDLE_S}s")
+                elif j is not None and j.get("state") == "running":
+                    left = max(0, int(IDLE_S - (time.time() - _state["last_activity"])))
+                    _api("POST", f"/api/jobs/{jid}/progress", {"message": f"idle, releasing the GPU in {left}s", "eta_s": left})
         except Exception:
             pass
 

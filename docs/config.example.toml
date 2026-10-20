@@ -1,0 +1,27 @@
+# Example doum config (~/.config/doum/doum.toml). Every key is optional; these are the defaults unless noted.
+total_shards = 110          # ~110 GB of the 121 GB unified pool
+gb_per_shard = 1.0
+listen = "127.0.0.1:8420"
+default_mode = "ask"        # pop-up with Smart / Wait / Pause; no answer in 60 s -> smart
+ask_timeout_s = 60
+smart_wait_s = 600          # smart waits for jobs finishing within 10 min, pauses longer ones
+max_wait_s = 1200           # check back after 20 min of waiting (interactive / foreground jobs)
+pause_grace_s = 90          # time to save a checkpoint before a paused job is killed
+
+[memory]
+check = true
+headroom_gb = 6
+
+# gb10-guard: thermal cool-down + temperature + free-memory gate before every job (the power-off protection)
+[hooks]
+pre_start = ["python3", "-c", "import sys; sys.path.insert(0, '/path/to/gb10-guard'); import gate; gate.wait_ready(sys.argv[1]); gate.job_started(sys.argv[1])", "doum:{name}"]
+post_end  = ["python3", "-c", "import sys; sys.path.insert(0, '/path/to/gb10-guard'); import gate; gate.job_finished()"]
+
+[notify]
+desktop = true
+ntfy_url = ""               # phone push: set when the phone milestone is done
+webhooks = []
+
+[comfyui]
+url = "http://127.0.0.1:8188"
+free_when_idle = true       # unload ComfyUI's cached models (only when its queue is empty) if a job needs the memory

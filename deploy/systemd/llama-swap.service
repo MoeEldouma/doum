@@ -1,0 +1,13 @@
+[Unit]
+Description=llama-swap: local models on demand (each one a doum job)
+After=doum.service
+Wants=doum.service
+
+[Service]
+ExecStart=%h/.local/bin/llama-swap -config %h/.config/llama-swap/config.yaml -listen 127.0.0.1:8410
+Restart=on-failure
+RestartSec=3
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=doum: GPU queue for this workstation
+After=default.target
+
+[Service]
+ExecStart=%h/.local/bin/doum daemon
+Restart=on-failure
+RestartSec=3
+# desktop notifications
+Environment=DISPLAY=:0
+Environment=RUST_LOG=doum=info
+
+[Install]
+WantedBy=default.target

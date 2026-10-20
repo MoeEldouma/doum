@@ -3,7 +3,7 @@
 All notable changes to Doum are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Doum uses [Semantic Versioning](https://semver.org/).
 
-## v0.1.0 (unreleased)
+## v0.1.0 (2026-10-21)
 
 First public release. Linux only; tested on one NVIDIA GB10 (128 GB unified memory).
 

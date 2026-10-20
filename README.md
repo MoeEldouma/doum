@@ -1,9 +1,10 @@
 # Doum
 
-**Share one GPU between ComfyUI, local LLMs, training jobs and AI agents, without out-of-memory crashes.**
+**Your GPU has too many roommates. Doum makes them take turns.**
 
-Doum is a small queue for a single AI workstation. Every GPU job asks for *shards* of GPU memory, waits its turn,
-and gets paused and resumed when something more urgent needs the GPU.
+Local LLMs, ComfyUI image and video models, training runs and your AI coding sessions all want the same GPU. Doum is
+the queue between them: every job asks for *shards* of GPU memory, waits its turn, and gets paused and resumed when
+something more urgent needs the GPU. It talks to each app, and pings your phone when a decision is yours.
 
 ![Doum demo: an interactive LLM job pauses a training run, waits for a render, then training resumes](docs/demo.gif)
 

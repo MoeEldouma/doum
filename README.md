@@ -14,7 +14,7 @@ then the training resumes from its checkpoint. Recorded with stand-in CPU jobs (
 > Named after the **doum palm** (دوم) of the Nile in Sudan: a tough, branching palm that survives the heat and gives
 > shade to every traveller who stops under it. One GPU, shade for every job.
 
-> **Status: v0.1.0 (unreleased).** Linux only. Built and tested on one machine: an NVIDIA GB10 (DGX Spark-class,
+> **Status: v0.1.0 (unreleased).** Linux only. Built and tested on one machine: an NVIDIA DGX Spark (GB10,
 > 128 GB unified memory). It should work on other NVIDIA Linux boxes, but nobody has tried yet. See
 > [Status and roadmap](#status-and-roadmap).
 

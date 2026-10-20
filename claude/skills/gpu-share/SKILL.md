@@ -18,8 +18,9 @@ job only when its memory fits, pauses and resumes long jobs when something urgen
 - From an agent: MCP `gpu_run` with `name`, `command`, `shards` (and `mem_gb` if known), then `gpu_wait` / `gpu_job`.
 - From a shell: `doum run --shards N -- <command>` (foreground) or `doum run --detach --shards N -- <command>` for long
   jobs (pausable). Add `--interactive` only when the user is waiting for the result right now.
-- **Local LLMs need no server start:** call the OpenAI-compatible endpoint `http://127.0.0.1:8410/v1`
-  (models `gpt-oss-120b`, `qwen3.6-35b`). They load as doum jobs on demand and unload when idle.
+- **Local LLMs need no server start** if they are served through llama-swap with doum (see
+  `integrations/llama-swap`): call its OpenAI-compatible endpoint (`http://127.0.0.1:8410/v1` in the example config).
+  Models load as doum jobs on demand and unload when idle.
 - Long jobs should report progress so the queue can make good decisions:
   `doum progress "epoch 3/10" --eta 2h` (from inside the job), and save a checkpoint on SIGTERM (that's what "pause" sends).
 

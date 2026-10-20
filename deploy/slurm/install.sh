@@ -7,7 +7,7 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || exec sudo bash "$0" "$@"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 HOST="$(hostname -s)"
-USER_NAME="${SUDO_USER:-moe}"
+USER_NAME="${SUDO_USER:-$(logname 2>/dev/null || id -un)}"
 say() { printf '\n\033[1;33m== %s\033[0m\n' "$*"; }
 
 say "1/6 packages: munge + slurm-wlm (Ubuntu 24.04 repository, Slurm 23.11)"
@@ -44,4 +44,4 @@ sinfo
 scontrol show node "$(hostname -s)" | grep -E "State=|Gres=|CfgTRES"
 echo "test job as $USER_NAME (1 shard, no GPU work):"
 sudo -u "$USER_NAME" srun --partition=batch --gres=shard:1 --time=1 bash -c 'echo "  ran as job $SLURM_JOB_ID on $(hostname -s)"'
-say "Slurm is installed. Set backend = \"slurm\" in ~/.config/doum/doum.toml to use it."
+say "Slurm is installed and configured with GPU shards. Note: doum does not submit jobs to Slurm yet (preview); see docs/how-it-works.md."

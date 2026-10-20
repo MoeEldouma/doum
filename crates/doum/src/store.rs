@@ -51,8 +51,18 @@ impl Store {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        // owner only: jobs keep their environment so they can be restarted after a pause
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(&serde_json::to_vec_pretty(self)?)?;
+        f.sync_all()?;
         std::fs::rename(&tmp, path)?;
         Ok(())
     }

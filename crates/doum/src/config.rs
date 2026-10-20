@@ -105,6 +105,9 @@ impl Default for McpCfg {
 #[serde(default)]
 pub struct ClaudeHookCfg {
     pub gpu_patterns: Vec<String>,
+    /// Added to the hook's message, e.g. where local LLMs are served
+    /// ("Local LLMs load on demand at http://127.0.0.1:8410/v1 (llama-swap)."). Empty = nothing added.
+    pub hint: String,
 }
 
 impl Default for ClaudeHookCfg {
@@ -123,6 +126,7 @@ impl Default for ClaudeHookCfg {
             .iter()
             .map(|s| s.to_string())
             .collect(),
+            hint: String::new(),
         }
     }
 }
@@ -192,6 +196,11 @@ impl Paths {
                 .unwrap_or_else(|| dirs.data_local_dir().to_path_buf())
         });
         std::fs::create_dir_all(&state_dir)?;
+        // jobs' environments (which can hold API keys), logs and the API token live here: owner only
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&state_dir, std::fs::Permissions::from_mode(0o700))?;
+        }
         std::fs::create_dir_all(state_dir.join("logs"))?;
         std::fs::create_dir_all(state_dir.join("exit"))?;
         Ok(Self { config, state_dir })

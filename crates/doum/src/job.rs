@@ -103,7 +103,7 @@ pub struct Job {
     /// This job was paused to make room for that job; it stays held until that job has started.
     #[serde(default)]
     pub paused_for: Option<JobId>,
-    /// Set while Pausing: when the stop signal was sent (SIGKILL after the grace period).
+    /// Set while Pausing or cancelling: when the stop signal was sent (SIGKILL after the grace period).
     #[serde(default)]
     pub pausing_since: Option<u64>,
     /// Ask the user after this many seconds still pending (0 = never).

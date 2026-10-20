@@ -461,6 +461,7 @@ impl Daemon {
                 j.reason = "cancelling".into();
                 j.state = State::Running;
                 j.exit_code = Some(-1);
+                j.pausing_since = Some(t); // SIGKILL after the grace period, as for a pause
                 if let Some(pg) = j.pid {
                     exec::signal_group(pg, Signal::SIGTERM);
                 }
@@ -625,7 +626,8 @@ impl Daemon {
                 None => !j.pid.is_some_and(sys::pid_alive),
             };
             if !finished {
-                if j.state == State::Pausing && j.pausing_since.is_some_and(|s| t.saturating_sub(s) > grace) {
+                let stopping = j.state == State::Pausing || j.exit_code == Some(-1);
+                if stopping && j.pausing_since.is_some_and(|s| t.saturating_sub(s) > grace) {
                     if let Some(pg) = j.pid {
                         exec::signal_group(pg, Signal::SIGKILL);
                     }
@@ -853,7 +855,7 @@ impl Daemon {
             total_shards: self.cfg.total_shards,
             used_shards: sched::used_shards(&self.store.jobs),
             mem_available_gb: (sys::mem_available_gb() * 10.0).round() / 10.0,
-            jobs: self.store.jobs.clone(),
+            jobs: self.store.jobs.iter().map(public).collect(),
             queue: sched::order(&self.store.jobs).iter().map(|j| j.id).collect(),
             decisions: self.store.open_decisions().cloned().collect(),
             unmanaged: self.unmanaged_cache.clone(),
@@ -861,6 +863,14 @@ impl Daemon {
             now: now(),
         }
     }
+}
+
+/// A job as the API shows it: without its environment, which can hold the API keys of the shell that ran
+/// `doum run`. The daemon keeps the environment to restart paused jobs; it is never sent back out.
+fn public(j: &Job) -> Job {
+    let mut j = j.clone();
+    j.env.clear();
+    j
 }
 
 fn view(mode: Mode, p: &Plan) -> PlanView {
@@ -952,7 +962,7 @@ async fn h_job(AxState(s): AxState<Shared>, Path(id): Path<JobId>) -> ApiResult<
     lock(&s)
         .store
         .job(id)
-        .cloned()
+        .map(public)
         .map(Json)
         .ok_or(ApiErr(StatusCode::NOT_FOUND, "no such job".into()))
 }
@@ -1034,6 +1044,21 @@ async fn h_prometheus(AxState(s): AxState<Shared>) -> Response {
     ([("content-type", "text/plain; version=0.0.4; charset=utf-8")], body).into_response()
 }
 
+fn allowed_hosts(port: u16) -> Vec<String> {
+    ["127.0.0.1", "localhost", "[::1]"].iter().map(|h| format!("{h}:{port}")).collect()
+}
+
+/// Only answer requests addressed to this machine by name. A web page can point its own domain at 127.0.0.1
+/// (DNS rebinding); its requests then carry that domain in Host and are refused here.
+async fn host_guard(AxState(hosts): AxState<Arc<Vec<String>>>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let host = req.headers().get("host").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if hosts.iter().any(|h| h == host) {
+        next.run(req).await
+    } else {
+        (StatusCode::FORBIDDEN, "doum: requests must be addressed to 127.0.0.1 or localhost").into_response()
+    }
+}
+
 pub fn router(s: Shared) -> Router {
     Router::new()
         .route("/", get(h_index))
@@ -1066,8 +1091,16 @@ pub async fn serve(cfg: Config, paths: Paths) -> Result<()> {
             let _ = tokio::task::spawn_blocking(move || lock(&s).tick()).await;
         }
     });
-    let listener = tokio::net::TcpListener::bind(&listen).await?;
-    axum::serve(listener, router(shared))
+    let addr: std::net::SocketAddr = listen
+        .parse()
+        .map_err(|_| anyhow::anyhow!("listen = {listen:?} must be an address like 127.0.0.1:8420"))?;
+    if !addr.ip().is_loopback() {
+        anyhow::bail!("listen = {listen:?}: doum only listens on this machine (127.0.0.1 or ::1)");
+    }
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let hosts = Arc::new(allowed_hosts(addr.port()));
+    let app = router(shared).layer(axum::middleware::from_fn_with_state(hosts, host_guard));
+    axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })

@@ -6,8 +6,9 @@ After=default.target
 ExecStart=%h/.local/bin/doum daemon
 Restart=on-failure
 RestartSec=3
-# desktop notifications
-Environment=DISPLAY=:0
+# Stop only the daemon on restart. Background jobs run in their own process groups and must keep running; the
+# restarted daemon picks them up again. (The default, control-group, would SIGTERM every job too.)
+KillMode=process
 Environment=RUST_LOG=doum=info
 
 [Install]

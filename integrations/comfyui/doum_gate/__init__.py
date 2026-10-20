@@ -20,14 +20,15 @@ import urllib.request
 
 DOUM = os.environ.get("DOUM_BIN") or os.path.expanduser("~/.local/bin/doum")
 API = os.environ.get("DOUM_API", "http://127.0.0.1:8420")
-TOKEN_FILE = os.path.expanduser(os.environ.get("DOUM_TOKEN_FILE", "~/.local/state/doum/token"))
+STATE_DIR = os.path.expanduser(os.environ.get("DOUM_STATE_DIR", "~/.local/state/doum"))
+TOKEN_FILE = os.path.expanduser(os.environ.get("DOUM_TOKEN_FILE", os.path.join(STATE_DIR, "token")))
 SHARDS = int(os.environ.get("DOUM_COMFY_SHARDS", "60"))
 IDLE_S = int(os.environ.get("DOUM_COMFY_IDLE_S", "90"))
 COMFY_URL = os.environ.get("DOUM_COMFY_URL", "http://127.0.0.1:8188")
 TAG = "[doum]"
 # Handshake: when doum pauses or ends the lease, its holder process waits for this file, written once ComfyUI has
 # really stopped rendering and unloaded its models, so the GPU is only handed over when it is actually free.
-FLAG_DIR = os.path.expanduser("~/.local/state/doum/comfyui")
+FLAG_DIR = os.path.join(STATE_DIR, "comfyui")
 STOPPED = os.path.join(FLAG_DIR, f"{os.getpid()}.stopped")
 
 _lock = threading.Lock()

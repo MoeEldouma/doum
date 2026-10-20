@@ -21,10 +21,14 @@ pub fn check(cfg: &ClaudeHookCfg, command: &str) -> Option<String> {
             return Some(format!(
                 "`{}` starts GPU work outside the GPU queue (doum). On this machine all GPU work goes through doum so jobs \
                  don't crash each other: use the doum MCP tools (gpu_status, then gpu_run) or prefix the command with \
-                 `doum run --shards <N> --` (add --detach for long jobs). Local LLMs are served on demand at \
-                 http://127.0.0.1:8410/v1 (llama-swap), no need to start a server. If this really must bypass the queue, \
+                 `doum run --shards <N> --` (add --detach for long jobs).{} If this really must bypass the queue, \
                  ask the user and add `# doum:allow`.",
-                m.as_str()
+                m.as_str(),
+                if cfg.hint.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", cfg.hint.trim())
+                }
             ));
         }
     }

@@ -58,8 +58,7 @@ the machine, and if nobody answers, Doum applies its recommendation at the deadl
    doum run -d -s 1 -n phone-check -- sh -c 'exit 3'
    ```
 
-   Within a few seconds your phone shows **doum: 'phone-check' failed**, with the text *exit code 3; see its log: `doum logs N`*
-   .
+   Within a few seconds your phone shows **doum: 'phone-check' failed**, with the text *exit code 3; see its log: `doum logs N`*.
 
 ## What each alert means
 

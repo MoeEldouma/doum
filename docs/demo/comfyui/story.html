@@ -1,0 +1,42 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0} body{width:1600px;background:#0b100e;color:#e8efe9;font-family:Inter,system-ui,sans-serif;padding:36px 40px 30px}
+h1{font-size:30px;font-weight:800} h1 em{font-style:normal;color:#6fcf8e}
+.sub{color:#a9b8b0;font-size:16px;margin:8px 0 26px}
+.step{display:grid;grid-template-columns:930px 1fr;gap:22px;margin-bottom:22px;align-items:start}
+.shot{border-radius:12px;overflow:hidden;border:1px solid #26302c} .shot img{width:100%;display:block}
+.card{background:#141b18;border:1px solid #26302c;border-radius:12px;padding:18px 20px}
+.k{font:600 12px ui-monospace,monospace;color:#6f807a;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px}
+.t{font-size:19px;font-weight:700;margin-bottom:12px} .t small{font:500 13px ui-monospace,monospace;color:#6f807a;margin-left:8px}
+.q{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.p{font:700 15px ui-monospace,monospace;padding:7px 12px;border-radius:9px;background:#1f2a26;border:1px solid #2e3a35}
+.p.run{background:#e7c27d;color:#0d1110;border-color:#e7c27d} .p.gate{background:transparent;border:2px dashed #e7c27d;color:#e7c27d}
+.p.urg{background:#f09c7c;color:#0d1110;border-color:#f09c7c} .lbl{font-size:13px;color:#a9b8b0;min-width:110px}
+.note{font-size:14px;color:#a9b8b0;line-height:1.5;margin-top:10px}
+.order{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 12px}
+.o{font:600 14px ui-monospace,monospace;padding:6px 10px;border-radius:8px;background:#1f2a26} .o.x{color:#ff7d6b;border:1px solid #6b2f28} .o.ok{color:#6fcf8e;border:1px solid #2c5a3c}
+.arrow{color:#6f807a} .thumbs{display:flex;gap:10px} .thumbs figure{flex:1} .thumbs img{width:100%;border-radius:8px;display:block}
+.thumbs figcaption{font:600 12px ui-monospace,monospace;color:#a9b8b0;margin-top:4px;text-align:center}
+.foot{color:#6f807a;font-size:13px;margin-top:6px}
+</style></head><body>
+<h1>Doum pauses ComfyUI for an urgent job, <em>and the interrupted render runs next</em></h1>
+<p class="sub">A real run on an NVIDIA DGX Spark, 22 October 2026. Three Flux renders are queued in ComfyUI; an urgent job then needs 80 of the 110 GPU shards.</p>
+
+<div class="step"><div class="shot"><img src="crop1.png"></div><div class="card">
+ <div class="k">00:31:45 · step 1</div><div class="t">A is rendering, B and C wait</div>
+ <div class="q"><span class="lbl">ComfyUI running</span><span class="p run">A</span></div>
+ <div class="q"><span class="lbl">ComfyUI queue</span><span class="p">B</span><span class="p">C</span></div>
+ <p class="note">ComfyUI holds a 60-shard lease in Doum. The panel's shard bar and timeline show it.</p></div></div>
+
+<div class="step"><div class="shot"><img src="crop2.png"></div><div class="card">
+ <div class="k">00:31:57 · step 2 · 4 s after the urgent job arrived</div><div class="t">Paused: the urgent job has the GPU</div>
+ <div class="q"><span class="lbl">Doum running</span><span class="p urg">urgent-llm · 80 shards</span></div>
+ <div class="q"><span class="lbl">ComfyUI next</span><span class="p gate">A' at Doum's gate</span><span class="p">B</span><span class="p">C</span></div>
+ <p class="note">A was interrupted, its models unloaded, and it went back into ComfyUI's own queue at the front before its run ended, so it is first in line, ahead of B. Older versions re-queued it a second later, and B could slip in first.</p></div></div>
+
+<div class="step"><div class="shot"><img src="crop3.png"></div><div class="card">
+ <div class="k">from ComfyUI's history · step 3</div><div class="t">The order ComfyUI actually ran them</div>
+ <div class="order"><span class="o x">A 00:31:33 interrupted</span><span class="arrow">→</span><span class="o ok">A' 00:32:24</span><span class="arrow">→</span><span class="o ok">B 00:33:19</span><span class="arrow">→</span><span class="o ok">C 00:34:13</span></div>
+ <div class="thumbs"><figure><img src="thumb_A.jpg"><figcaption>A (re-run)</figcaption></figure><figure><img src="thumb_B.jpg"><figcaption>B</figcaption></figure><figure><img src="thumb_C.jpg"><figcaption>C</figcaption></figure></div></div></div>
+
+<p class="foot">ComfyUI with Doum's doum_gate plugin, Doum v0.2 on the Slurm backend. The urgent job is a 25-second stand-in (it reserves 80 shards; no model). The timeline in step 3 also shows an earlier run of the same demo.</p>
+</body></html>

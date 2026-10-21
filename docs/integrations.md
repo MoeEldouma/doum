@@ -65,7 +65,13 @@ picks it next and the rest keep their order. (Earlier versions re-queued it over
 the next prompt in line could get there first.) If a ComfyUI version stores its queue differently, the plugin falls
 back to the HTTP API. `integrations/comfyui/tests/test_requeue.py` checks the order.
 
+![Doum pauses ComfyUI for an urgent job, and the interrupted render runs next](media/comfyui-pause-demo.png)
+
+*A real run on a DGX Spark: three Flux renders queued; an urgent job needing 80 of 110 shards pauses ComfyUI; the
+interrupted render goes back to the front and runs next, then B and C. Recipe: [docs/demo/comfyui](demo/comfyui/).*
+
 ### Known limits
+
 
 
 

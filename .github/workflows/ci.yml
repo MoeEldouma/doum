@@ -29,3 +29,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: test
         run: cargo test --all
+      - name: simulation (200k scheduling events)
+        run: cargo test --release sim_ -- --nocapture
+        env:
+          DOUM_SIM_EVENTS: "200000"

@@ -16,7 +16,19 @@ and Doum uses [Semantic Versioning](https://semver.org/).
 - Re-planning: estimates well past due count as unknown, and the job at the front of the queue is re-planned every 15 s,
   so a job that ran past its estimate is paused instead of being waited on forever.
 
+- Correctness checks (docs/correctness.md): property tests (proptest) for the scheduling rules and a deterministic
+  simulator (1,000,629 events across typical load and 15x overload: 0 over-allocations, 0 deadlocks, every job
+  finished).
+
+### Fixed
+- Two deadlocks found by the simulator: smart mode could pause an interactive job for a batch job, which then sat ahead
+  of it while held for it; and a job's "paused for" mark outlived the job it was for, so two jobs could end up held for
+  each other. Nothing pauses a higher lane now, and the mark is cleared when that job starts.
+
 ### Changed
+- Smart mode only pauses jobs in a lower lane (interactive work over batch work); jobs in the same lane no longer
+  pause each other (in the simulator they did, about 20 times per job). Same-lane pausing needs `-m pause` or
+  "Pause now".
 - `deploy/slurm`: the backfill scheduler (Slurm 23.11 without an accounting database only starts jobs in the backfill
   pass) and no time limit on the interactive partition.
 

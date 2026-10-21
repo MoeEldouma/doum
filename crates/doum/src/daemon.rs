@@ -243,6 +243,7 @@ impl Daemon {
             reason: "queued".into(),
         };
         let need = job.shards;
+        let lane = job.lane;
         self.store.jobs.push(job);
         self.dirty = true;
 
@@ -250,6 +251,7 @@ impl Daemon {
             &self.store.jobs,
             self.capacity(),
             need,
+            lane,
             mode,
             t,
             self.cfg.smart_wait_s,
@@ -276,12 +278,40 @@ impl Daemon {
     }
 
     fn open_fit_question(&mut self, id: JobId, need: u32, p: &Plan) -> Decision {
+        let lane = self.store.job(id).map(|j| j.lane).unwrap_or(Lane::Batch);
         let t = now();
         let jobs = &self.store.jobs;
         let total = self.capacity();
-        let smart = sched::plan(jobs, total, need, Mode::Smart, t, self.cfg.smart_wait_s, self.cfg.pause_grace_s);
-        let pause = sched::plan(jobs, total, need, Mode::Pause, t, self.cfg.smart_wait_s, self.cfg.pause_grace_s);
-        let wait = sched::plan(jobs, total, need, Mode::Wait, t, self.cfg.smart_wait_s, self.cfg.pause_grace_s);
+        let smart = sched::plan(
+            jobs,
+            total,
+            need,
+            lane,
+            Mode::Smart,
+            t,
+            self.cfg.smart_wait_s,
+            self.cfg.pause_grace_s,
+        );
+        let pause = sched::plan(
+            jobs,
+            total,
+            need,
+            lane,
+            Mode::Pause,
+            t,
+            self.cfg.smart_wait_s,
+            self.cfg.pause_grace_s,
+        );
+        let wait = sched::plan(
+            jobs,
+            total,
+            need,
+            lane,
+            Mode::Wait,
+            t,
+            self.cfg.smart_wait_s,
+            self.cfg.pause_grace_s,
+        );
         let running: Vec<String> = jobs
             .iter()
             .filter(|j| j.state.holds_shards())
@@ -330,6 +360,7 @@ impl Daemon {
             &self.store.jobs,
             self.capacity(),
             j.shards,
+            j.lane,
             Mode::Wait,
             t,
             self.cfg.smart_wait_s,
@@ -393,6 +424,7 @@ impl Daemon {
                             &self.store.jobs,
                             self.capacity(),
                             j.shards,
+                            j.lane,
                             mode,
                             t,
                             self.cfg.smart_wait_s,
@@ -408,6 +440,7 @@ impl Daemon {
                         &self.store.jobs,
                         self.capacity(),
                         j.shards,
+                        j.lane,
                         Mode::Pause,
                         t,
                         self.cfg.smart_wait_s,
@@ -815,10 +848,10 @@ impl Daemon {
         if self.store.jobs.iter().any(|j| j.state == State::Pausing) {
             return; // already making room
         }
-        let Some(head) = sched::order(&self.store.jobs).first().map(|j| (j.id, j.shards, j.mode)) else {
+        let Some(head) = sched::order(&self.store.jobs).first().map(|j| (j.id, j.shards, j.lane, j.mode)) else {
             return;
         };
-        let (id, need, mode) = head;
+        let (id, need, lane, mode) = head;
         if !matches!(mode, Mode::Smart | Mode::Pause) || self.store.open_decisions().any(|d| d.job_id == id) {
             return;
         }
@@ -826,6 +859,7 @@ impl Daemon {
             &self.store.jobs,
             self.capacity(),
             need,
+            lane,
             mode,
             t,
             self.cfg.smart_wait_s,
@@ -867,6 +901,11 @@ impl Daemon {
                 .map(|j| j.id),
         );
         for id in sched::to_start(&self.store.jobs, self.capacity(), &held) {
+            // jobs paused to make room for this one are not waiting for anything any more; a stale mark could
+            // later hold them behind a job that is in turn held for them (a deadlock the simulator found)
+            for other in self.store.jobs.iter_mut().filter(|o| o.paused_for == Some(id)) {
+                other.paused_for = None;
+            }
             let Some(j) = self.store.job(id).cloned() else { continue };
             if j.detached && self.cfg.backend == Backend::Slurm {
                 let mem = self.mem_for(&j);

@@ -12,6 +12,8 @@ mod mcp;
 mod metrics;
 mod notify;
 mod prom;
+#[cfg(test)]
+mod proof;
 mod sched;
 mod slurm;
 mod store;

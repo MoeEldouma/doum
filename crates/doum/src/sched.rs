@@ -5,7 +5,7 @@
 //! * Strict: if the job at the front does not fit, nothing behind it starts (no one sneaks ahead of a waiting job).
 //! * Smart: when a job does not fit, pause only the running jobs that will not finish soon.
 
-use crate::job::{Job, JobId, Mode, State};
+use crate::job::{Job, JobId, Lane, Mode, State};
 
 /// Pending jobs in the order they will be started.
 pub fn order(jobs: &[Job]) -> Vec<&Job> {
@@ -56,9 +56,19 @@ pub struct Plan {
     pub free_now: u32,
 }
 
-/// Plan for a job needing `need` shards under `mode`. `smart_s`: jobs finishing within this many seconds are
-/// waited for, longer (or unknown) ones are paused. `grace_s`: time a paused job gets to save and stop.
-pub fn plan(jobs: &[Job], total: u32, need: u32, mode: Mode, now: u64, smart_s: u64, grace_s: u64) -> Plan {
+/// Plan for a job in `lane` needing `need` shards under `mode`. `smart_s`: jobs finishing within this many seconds
+/// are waited for, longer (or unknown) ones are paused. `grace_s`: time a paused job gets to save and stop.
+///
+/// Which jobs may be paused depends on the lane:
+/// * `smart` (and ask's smart option) only pauses jobs in a lower lane: interactive work steps in front of batch
+///   work, but jobs in the same lane are first come, first served and never knock each other out (letting them did,
+///   in the simulator, pause and restart jobs about 20 times each);
+/// * `pause` (chosen explicitly) may also pause jobs in the same lane;
+/// * nothing ever pauses a job in a higher lane: batch work never stops interactive work. (A paused interactive job
+///   would otherwise sit ahead of the batch job it made room for, held until that job starts while blocking it: a
+///   deadlock the simulator in `proof.rs` found.)
+#[allow(clippy::too_many_arguments)]
+pub fn plan(jobs: &[Job], total: u32, need: u32, lane: Lane, mode: Mode, now: u64, smart_s: u64, grace_s: u64) -> Plan {
     let free_now = free_shards(jobs, total);
     let mut p = Plan {
         free_now,
@@ -76,6 +86,7 @@ pub fn plan(jobs: &[Job], total: u32, need: u32, mode: Mode, now: u64, smart_s: 
         .iter()
         .copied()
         .filter(|j| j.pausable())
+        .filter(|j| if mode == Mode::Pause { j.lane <= lane } else { j.lane < lane })
         .filter(|j| match mode {
             Mode::Pause => true,
             Mode::Smart | Mode::Ask => eta(j).is_none_or(|e| e > smart_s),
@@ -228,7 +239,7 @@ pub(crate) mod tests {
     #[test]
     fn fits_now_needs_no_plan() {
         let jobs = vec![job(1, Lane::Batch, 60, State::Running, 0)];
-        let p = plan(&jobs, 110, 50, Mode::Smart, 10, 600, 90);
+        let p = plan(&jobs, 110, 50, Lane::Interactive, Mode::Smart, 10, 600, 90);
         assert!(p.pause.is_empty() && p.wait_for.is_empty());
         assert_eq!(p.eta_s, Some(0));
     }
@@ -240,7 +251,7 @@ pub(crate) mod tests {
         let comfy = with_eta(job(1, Lane::Batch, 60, State::Running, 0), 300, now);
         let train = with_eta(job(2, Lane::Batch, 24, State::Running, 0), 7200, now);
         let jobs = vec![comfy, train];
-        let p = plan(&jobs, 110, 110, Mode::Smart, now, 600, 90);
+        let p = plan(&jobs, 110, 110, Lane::Interactive, Mode::Smart, now, 600, 90);
         assert_eq!(p.pause, vec![2]);
         assert_eq!(p.wait_for, vec![1]);
         assert_eq!(p.eta_s, Some(300));
@@ -263,9 +274,9 @@ pub(crate) mod tests {
 
         let train = with_eta(job(2, Lane::Batch, 24, State::Running, 0), 7200, 1000);
         let jobs = vec![comfy, train];
-        let early = plan(&jobs, 110, 110, Mode::Smart, 1100, 600, 90);
+        let early = plan(&jobs, 110, 110, Lane::Interactive, Mode::Smart, 1100, 600, 90);
         assert_eq!((early.pause.clone(), early.wait_for.clone()), (vec![2], vec![1]));
-        let late = plan(&jobs, 110, 110, Mode::Smart, 1500, 600, 90);
+        let late = plan(&jobs, 110, 110, Lane::Interactive, Mode::Smart, 1500, 600, 90);
         assert_eq!(late.pause.len(), 2, "the overrun render is paused too");
         assert!(late.wait_for.is_empty());
     }
@@ -283,7 +294,7 @@ pub(crate) mod tests {
             with_eta(job(1, Lane::Batch, 60, State::Running, 0), 300, now),
             with_eta(job(2, Lane::Batch, 24, State::Running, 0), 7200, now),
         ];
-        let p = plan(&jobs, 110, 110, Mode::Pause, now, 600, 90);
+        let p = plan(&jobs, 110, 110, Lane::Interactive, Mode::Pause, now, 600, 90);
         assert_eq!(p.pause.len(), 2);
         assert!(p.wait_for.is_empty());
         assert_eq!(p.eta_s, Some(90));
@@ -293,7 +304,7 @@ pub(crate) mod tests {
     fn wait_mode_pauses_nothing() {
         let now = 1000;
         let jobs = vec![with_eta(job(1, Lane::Batch, 60, State::Running, 0), 7200, now)];
-        let p = plan(&jobs, 110, 110, Mode::Wait, now, 600, 90);
+        let p = plan(&jobs, 110, 110, Lane::Interactive, Mode::Wait, now, 600, 90);
         assert!(p.pause.is_empty());
         assert_eq!(p.wait_for, vec![1]);
         assert_eq!(p.eta_s, Some(7200));
@@ -302,7 +313,7 @@ pub(crate) mod tests {
     #[test]
     fn unknown_eta_counts_as_long_in_smart() {
         let jobs = vec![job(1, Lane::Batch, 60, State::Running, 0)];
-        let p = plan(&jobs, 110, 110, Mode::Smart, 10, 600, 90);
+        let p = plan(&jobs, 110, 110, Lane::Interactive, Mode::Smart, 10, 600, 90);
         assert_eq!(p.pause, vec![1]);
     }
 
@@ -312,7 +323,7 @@ pub(crate) mod tests {
         fg.detached = false;
         let mut np = job(2, Lane::Batch, 40, State::Running, 0);
         np.no_pause = true;
-        let p = plan(&[fg, np], 110, 110, Mode::Pause, 10, 600, 90);
+        let p = plan(&[fg, np], 110, 110, Lane::Interactive, Mode::Pause, 10, 600, 90);
         assert!(p.pause.is_empty());
         assert_eq!(p.wait_for.len(), 2);
         assert_eq!(p.eta_s, None); // nobody reported an ETA

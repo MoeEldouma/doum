@@ -45,9 +45,11 @@ is a *plan*: which running jobs to pause, which to wait for, and an estimated st
 
 - Only running **detached** jobs that did not ask for `--no-pause` can be paused. Foreground jobs are never paused.
 - **wait**: pause nothing. Wait for running jobs, soonest-finishing first, until enough shards would be free.
-- **pause**: every pausable running job is a candidate.
-- **smart**: a pausable running job is a candidate only if its time left (from its last `doum progress --eta`, counted
-  down since the report) is more than `smart_wait_s` (600 s), or unknown.
+- **Lanes come first.** Nothing ever pauses a job in a higher lane: batch work never stops interactive work.
+- **pause** (chosen explicitly): every pausable running job in the same lane or a lower one is a candidate.
+- **smart**: only pausable jobs in a *lower* lane are candidates (interactive work steps in front of batch work; jobs
+  in the same lane are first come, first served and never knock each other out), and only if their time left (from
+  the last `doum progress --eta`, counted down since the report) is more than `smart_wait_s` (600 s), or unknown.
 - Candidates are paused longest-remaining first (unknown counts as longest; then larger jobs first), only as many as
   needed to free enough shards.
 - If pausing every candidate is still not enough, those candidates are paused anyway and the rest of the running jobs
@@ -59,7 +61,9 @@ is a *plan*: which running jobs to pause, which to wait for, and an estimated st
   `ask_timeout_s` (60 s) the recommendation, smart, is applied.
 
 When a plan pauses jobs, the new job is moved to the front of its lane, and the paused jobs are marked as paused for
-it (see *held* above).
+it (see *held* above). The mark is cleared the moment that job starts, so a paused job can never end up waiting for
+a job that is in turn waiting for it. These rules are checked on thousands of random cases and a million-event
+simulation; see [Correctness](correctness.md).
 
 ### Re-planning when an estimate goes stale
 

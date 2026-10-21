@@ -363,7 +363,8 @@ fn run(cfg: &Config, paths: &Paths, o: RunOpts, command: Vec<String>) -> Result<
     eprintln!("doum: job {id} '{}' queued ({} shards)", r.job.name, r.job.shards);
     if let Some(d) = &r.decision {
         eprintln!(
-            "doum: the GPU is busy — {}\ndoum: answer with `doum answer {} <{}>` (no answer → {} in {})",
+            "doum: {}\n{}\ndoum: answer here, on the desktop pop-up, on your phone, or with `doum answer {} <{}>` (no answer: {} in {})",
+            d.title,
             d.text,
             d.id,
             d.options.join("|"),

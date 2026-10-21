@@ -27,6 +27,9 @@ pub struct Config {
     pub pause_grace_s: u64,
     /// GPU processes outside the queue smaller than this (GB) are not reported (driver contexts, idle servers).
     pub unmanaged_min_gb: f64,
+    /// A job standing in for an app (a lease, like ComfyUI's) that has reported progress before and then goes quiet
+    /// this long is treated as stuck: its shards are released and you are told. 0 = never.
+    pub stale_lease_s: u64,
     /// Who runs background jobs: `native` (Doum itself) or `slurm` (Doum decides, Slurm runs them).
     pub backend: Backend,
     pub slurm: SlurmCfg,
@@ -102,6 +105,10 @@ pub struct NotifyCfg {
     pub ntfy_url: String,
     /// Extra webhooks (JSON POST of every alert).
     pub webhooks: Vec<String>,
+    /// Answer questions from the phone: ntfy buttons send the answer to a second private topic that Doum listens to.
+    pub phone_answers: bool,
+    /// That topic. Empty: the alerts topic with `-answers` added.
+    pub ntfy_answers_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +192,7 @@ impl Default for Config {
             ask_timeout_s: 60,
             pause_grace_s: 90,
             unmanaged_min_gb: 1.0,
+            stale_lease_s: 300,
             backend: Backend::Native,
             slurm: SlurmCfg::default(),
             memory: MemoryCfg::default(),
@@ -210,6 +218,8 @@ impl Default for NotifyCfg {
             desktop: true,
             ntfy_url: String::new(),
             webhooks: vec![],
+            phone_answers: true,
+            ntfy_answers_url: String::new(),
         }
     }
 }

@@ -109,6 +109,12 @@ enum Cmd {
     Top,
     /// Check the whole setup (daemon, GPU, freeze support, Slurm, alerts) and say what to fix.
     Doctor,
+    /// Recent alerts and questions, newest first (the same ones your desktop and phone got).
+    Alerts {
+        /// How many to show.
+        #[arg(short, long, default_value_t = 20)]
+        number: usize,
+    },
     /// Open the web panel in your browser (and unlock its controls).
     Panel,
     /// MCP server on stdio, for AI agents (e.g. `claude mcp add doum -- doum mcp`).
@@ -224,6 +230,20 @@ fn real_main(cli: Cli) -> Result<()> {
         }
         Cmd::Top => tui::run(&Client::new(&cfg, &paths)?),
         Cmd::Doctor => std::process::exit(doctor::run(&cfg, &paths)),
+        Cmd::Alerts { number } => {
+            let s: StatusView = Client::new(&cfg, &paths)?.get("/api/status")?;
+            if s.alerts.is_empty() {
+                println!("no alerts yet");
+            }
+            for a in s.alerts.iter().take(number) {
+                let ago = fmt_dur(s.now.saturating_sub(a.t));
+                println!("{:>8} ago  {:<9} {}", ago, format!("{:?}", a.kind).to_lowercase(), a.title);
+                for line in a.body.lines().filter(|l| !l.trim().is_empty()) {
+                    println!("{:>20}{line}", "");
+                }
+            }
+            Ok(())
+        }
         Cmd::Mcp => mcp::serve(cfg, paths),
         Cmd::ClaudeHook => std::process::exit(hook::run(&cfg.claude_hook)),
         Cmd::Panel => {
@@ -489,8 +509,9 @@ fn print_status(s: &StatusView, all: bool) {
         println!("\nQUESTIONS FOR YOU");
         for d in &s.decisions {
             println!(
-                "  #{}  {}\n       answer: doum answer {} <{}>  (default {} in {})",
+                "  #{}  {}\n       {}\n       answer: doum answer {} <{}>  (default {} in {})",
                 d.id,
+                d.title,
                 d.text.replace('\n', "\n       "),
                 d.id,
                 d.options.join("|"),

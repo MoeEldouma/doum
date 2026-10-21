@@ -63,7 +63,15 @@
   button.rec { background: var(--palm); color: #0d1110; border-color: var(--palm); }
   button.danger:hover { border-color: var(--red); color: var(--red); }
   .q { border: 1px solid #5b4a26; background: #1d1910; border-radius: 10px; padding: 12px; margin-top: 8px; }
-  .q p { margin: 0 0 10px; white-space: pre-line; }
+    .q b { display: block; font-size: 15px; margin-bottom: 4px; }
+  .q p { margin: 0 0 10px; white-space: pre-line; color: var(--soft); }
+  .al { display: grid; grid-template-columns: 24px 1fr auto; gap: 2px 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .al:first-child { border-top: 0; }
+  .al .ic { font-size: 16px; line-height: 20px; }
+  .al .tt { font-weight: 650; font-size: 13.5px; }
+  .al .ago { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+  .al .bd { grid-column: 2 / -1; color: var(--soft); font-size: 12.5px; white-space: pre-line;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .q .acts { flex-wrap: wrap; }
   .q .dl { font: 12px var(--mono); color: var(--sand); margin-left: auto; align-self: center; }
   .chart { margin-top: 6px; }
@@ -98,7 +106,8 @@
   <div class="col">
     <section><h2>Last hour</h2><div id="charts"></div></section>
     <section><h2>Outside the queue</h2><div id="outside"></div></section>
-    <section><h2>Finished</h2><div id="finished"></div></section>
+        <section><h2>Finished</h2><div id="finished"></div></section>
+    <section><h2>Recent alerts <small style="text-transform:none;letter-spacing:0;color:var(--muted);font:12px var(--mono)">· what your desktop and phone got</small></h2><div id="alerts"></div></section>
   </div>
 </div>
 <div class="note" id="note"></div>
@@ -214,10 +223,14 @@ function render(s) {
   $("running").innerHTML = running.map((j) => jobRow(j, now, "run")).join("") || `<div class="empty">nothing on the GPU</div>`;
   $("waiting").innerHTML = s.queue.map((id) => jobs.find((j) => j.id === id)).filter(Boolean).map((j) => jobRow(j, now, "wait")).join("") || `<div class="empty">queue empty</div>`;
 
-  $("questions").innerHTML = s.decisions.map((d) => `<div class="q"><p>${esc(d.text)}</p><div class="acts">${d.options.map((o) => `<button class="${o === d.recommended ? "rec" : ""}" onclick="act('/api/decisions/${d.id}',{choice:'${o}'})">${label[o] || o}</button>`).join("")}<span class="dl">default ${label[d.recommended] || d.recommended} in ${dur(Math.max(0, d.deadline - now))}</span></div></div>`).join("") || `<div class="empty">none</div>`;
+  $("questions").innerHTML = s.decisions.map((d) => `<div class="q"><b>${esc(d.title || "")}</b><p>${esc(d.text)}</p><div class="acts">${d.options.map((o) => `<button class="${o === d.recommended ? "rec" : ""}" onclick="act('/api/decisions/${d.id}',{choice:'${o}'})">${label[o] || o}</button>`).join("")}<span class="dl">default ${label[d.recommended] || d.recommended} in ${dur(Math.max(0, d.deadline - now))}</span></div></div>`).join("") || `<div class="empty">none</div>`;
 
   const slurmRows = (s.external || []).map((e) => `<div class="job"><div><span class="name">${esc(e.name)}</span><span class="lane">slurm ${e.id}</span><div class="meta">${e.shards} shards · ${esc(e.state.toLowerCase())}${e.state === "PENDING" && e.reason && e.reason !== "None" ? ` (${esc(e.reason)})` : ""} · ${esc(e.user)} · submitted outside Doum, counted against the GPU</div></div></div>`).join("");
   $("outside").innerHTML = slurmRows + s.unmanaged.map((p) => `<div class="job"><div><span class="name">${esc(p.name)}</span><div class="meta">pid ${p.pid} · ~${p.mem_gb.toFixed(1)} GB · not waiting its turn</div></div></div>`).join("") || `<div class="empty">nothing</div>`;
+
+    const icon = { question: "❓", paused: "⏸️", resumed: "▶️", finished: "✅", failed: "❌", outside: "⚠️", stuck: "⏳", decided: "☑️" };
+  const ago = (t) => dur(Math.max(0, now - t)) + " ago";
+  $("alerts").innerHTML = (s.alerts || []).slice(0, 12).map((a) => `<div class="al"><span class="ic">${icon[a.kind] || "•"}</span><span class="tt">${esc(a.title)}</span><span class="ago">${ago(a.t)}</span><span class="bd">${esc(a.body)}</span></div>`).join("") || `<div class="empty">none yet</div>`;
 
   const fin = jobs.filter((j) => ["done", "failed", "cancelled"].includes(j.state)).sort((a, b) => (b.ended_at || 0) - (a.ended_at || 0)).slice(0, 12);
   $("finished").innerHTML = fin.length ? `<div class="fin">${fin.map((j) => `<span>#${j.id}</span><span>${esc(j.name)}</span><span class="${j.state}">${j.state}</span><span>${energy(j.energy_j)}</span>`).join("")}</div>` : `<div class="empty">none yet</div>`;

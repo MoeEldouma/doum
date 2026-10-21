@@ -163,6 +163,7 @@ mod tests {
             unmanaged: vec![],
             latest: None,
             backend: Default::default(),
+            alerts: vec![],
             external: vec![],
             now: 200,
         };

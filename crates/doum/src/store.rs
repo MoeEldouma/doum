@@ -23,9 +23,19 @@ pub struct Decision {
     pub id: u64,
     pub job_id: JobId,
     pub kind: DecisionKind,
+    /// One line: who is waiting.
+    #[serde(default)]
+    pub title: String,
+    /// The situation, then one line per choice.
     pub text: String,
+    /// One line per option (same order as `options`), e.g. "Smart: pause train, start in about 2 min".
+    #[serde(default)]
+    pub choices: Vec<String>,
     pub options: Vec<String>,
     pub recommended: String,
+    /// One-time code that phone answers must carry. Not shown in the API.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub code: String,
     pub created_at: u64,
     pub deadline: u64,
     pub answer: Option<String>,
@@ -37,6 +47,9 @@ pub struct Store {
     pub jobs: Vec<Job>,
     #[serde(default)]
     pub decisions: Vec<Decision>,
+    /// Recent alerts, so the panel and `doum alerts` keep them across restarts.
+    #[serde(default)]
+    pub alerts: Vec<crate::notify::AlertRec>,
 }
 
 impl Store {

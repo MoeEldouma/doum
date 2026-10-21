@@ -66,6 +66,7 @@ default_mode = "smart"
 smart_wait_s = 600
 max_wait_s = 0
 pause_grace_s = 3
+stale_lease_s = 6
 unmanaged_min_gb = 100000
 [memory]
 check = false
@@ -158,6 +159,44 @@ curl -s "127.0.0.1:$PORT/metrics" | grep -q '^doum_up 1' || fail "/metrics"
 ok "Prometheus /metrics"
 doum cancel "$(job envjob id)" >/dev/null
 
+echo "questions and phone answers"
+doum run -d -s 60 -n holder -- sleep 120 >/dev/null
+wait_for "holder running" 10 state_is holder running
+doum run -d -m ask -s 110 -n asker -- sleep 2 >/dev/null
+qid() { doum status --json | python3 -c "import sys,json; d=json.load(sys.stdin)['decisions']; print(d[0]['id'] if d else '')"; }
+wait_for "a question" 10 sh -c '[ -n "$(doum status --json | python3 -c "import sys,json;print(json.load(sys.stdin)[\"decisions\"])")" ]'
+Q=$(qid)
+curl -s "127.0.0.1:$PORT/api/status" | python3 -c "import sys,json; d=json.load(sys.stdin)['decisions'][0]; sys.exit(1 if d.get('code') else 0)" ||
+    fail "a question's one-time code is visible in the API"
+ok "a question's one-time code is not in the API"
+answer() {
+    curl -s -o /dev/null -w "%{http_code}" -X POST "127.0.0.1:$PORT/api/decisions/$Q" -H "x-doum-token: $TOKEN" \
+        -H 'content-type: application/json' -d "{\"choice\":\"pause\",\"code\":\"$1\",\"from\":\"phone\"}"
+}
+[ "$(answer wrongcode)" != "200" ] || fail "a phone answer with the wrong code was accepted"
+ok "a phone answer with the wrong code is refused"
+code_of() { python3 -c "import json,sys; print([d for d in json.load(open(sys.argv[1]))['decisions'] if d['id']==int(sys.argv[2])][0]['code'])" "$DOUM_STATE_DIR/state.json" "$Q"; }
+wait_for "the question is saved" 10 code_of
+CODE=$(code_of)
+[ "$(answer "$CODE")" = "200" ] || fail "a phone answer with the right code was refused"
+wait_for "asker done after the phone answer" 20 state_is asker done
+ok "a phone answer with the right code is applied (Pause now)"
+doum alerts -n 5 | grep -q "Answered from your phone" || fail "no confirmation for the phone answer in doum alerts"
+ok "doum alerts shows the confirmation"
+doum cancel "$(job holder id)" >/dev/null
+
+echo "a lease that stops checking in"
+sleep 300 &
+APP=$!
+doum run -d -s 10 -n lease --covers-pid "$APP" -- sleep 300 >/dev/null
+wait_for "lease running" 10 state_is lease running
+curl -s -o /dev/null -X POST "127.0.0.1:$PORT/api/jobs/$(job lease id)/progress" -H "x-doum-token: $TOKEN" \
+    -H 'content-type: application/json' -d '{"message":"idle","eta_s":60}'
+wait_for "the silent lease is released" 20 state_is lease cancelled
+doum alerts -n 5 | grep -q "lease stopped responding" || fail "no 'stopped responding' alert"
+ok "a lease that goes quiet is released, with an alert"
+kill "$APP" 2>/dev/null || true
+
 echo "re-planning when a job overruns its estimate (about a minute)"
 doum run -d -s 60 -n liar -- "$T"/liar.sh >/dev/null
 wait_for "liar running" 10 state_is liar running
@@ -167,7 +206,7 @@ sleep 3
 state_is liar running || fail "smart mode should first wait for a job that says it is almost done"
 ok "smart mode waits for a job that says it is almost done"
 wait_for "the overrunning job is paused" 90 state_is urgent done
-grep -q "ran past its estimate" "$T/daemon.log" || fail "no 'ran past its estimate' in the daemon log"
+grep -qi "ran past its estimate" "$T/daemon.log" || fail "no 'ran past its estimate' in the daemon log"
 ok "once its estimate went stale it was paused, and the urgent job ran"
 doum cancel "$(job liar id)" >/dev/null
 

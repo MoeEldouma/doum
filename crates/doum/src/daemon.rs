@@ -18,7 +18,7 @@ use crate::config::{Backend, Config, Paths};
 use crate::exec;
 use crate::job::{now, Job, JobId, Lane, Mode, Progress, State};
 use crate::metrics::{self, History, Sample};
-use crate::notify::{Level, Notifier};
+use crate::notify::{self, Kind, Notifier};
 use crate::sched::{self, Plan};
 use crate::slurm;
 use crate::store::{Decision, DecisionKind, Store};
@@ -42,6 +42,8 @@ pub struct Daemon {
     last_prune: u64,
     last_sample: u64,
     last_replan: u64,
+    /// The notifier's alert count when the state was last saved.
+    saved_alerts: u64,
     pub history: History,
     dirty: bool,
 }
@@ -111,6 +113,9 @@ pub struct StatusView {
     /// `native` or `slurm`.
     #[serde(default)]
     pub backend: Backend,
+    /// Recent alerts, newest first.
+    #[serde(default)]
+    pub alerts: Vec<notify::AlertRec>,
     /// Slurm jobs that are not Doum's (submitted with plain sbatch/srun), with the shards they hold.
     #[serde(default)]
     pub external: Vec<slurm::SlurmJob>,
@@ -134,6 +139,12 @@ pub struct DoneReq {
 #[derive(Debug, Deserialize)]
 pub struct AnswerReq {
     pub choice: String,
+    /// The question's one-time code (phone answers).
+    #[serde(default)]
+    pub code: Option<String>,
+    /// Where the answer came from: "phone", "desktop", or empty.
+    #[serde(default)]
+    pub from: Option<String>,
 }
 
 // ---------- core ----------
@@ -143,7 +154,7 @@ impl Daemon {
         let store = Store::load(&paths.state_file())?;
         let token = load_or_create_token(&paths)?;
         let api = format!("http://{}", cfg.listen);
-        let notifier = Notifier::new(cfg.notify.clone());
+        let notifier = Notifier::new(cfg.notify.clone(), store.alerts.clone());
         Ok(Self {
             cfg,
             paths,
@@ -160,6 +171,7 @@ impl Daemon {
             last_prune: 0,
             last_sample: 0,
             last_replan: 0,
+            saved_alerts: 0,
             history: History::default(),
             dirty: true,
         })
@@ -210,19 +222,28 @@ impl Daemon {
         })
     }
 
+    /// A job in one short phrase: "comfyui (60 shards, done in ~4 min, rendering 2/5)".
     fn describe(&self, id: JobId, t: u64) -> String {
         match self.store.job(id) {
             Some(j) => {
-                let eta = j.eta_left(t).map(fmt_dur).unwrap_or_else(|| "time left unknown".into());
-                let msg = if j.progress.message.is_empty() {
-                    String::new()
-                } else {
-                    format!(" — {}", j.progress.message)
+                let eta = match j.eta_left(t) {
+                    Some(0) => "finishing".to_string(),
+                    Some(s) => format!("done in ~{}", fmt_dur(s)),
+                    None => "no estimate".to_string(),
                 };
-                format!("'{}' ({} shards, {eta}{msg})", j.name, j.shards)
+                let msg: String = j.progress.message.trim().chars().take(40).collect();
+                let msg = if msg.is_empty() { String::new() } else { format!(", {msg}") };
+                format!("{} ({} shards, {eta}{msg})", j.name, j.shards)
             }
             None => format!("job {id}"),
         }
+    }
+
+    fn names(&self, ids: &[JobId]) -> String {
+        ids.iter()
+            .filter_map(|i| self.store.job(*i).map(|j| j.name.clone()))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     pub fn submit(&mut self, r: SubmitReq) -> SubmitResp {
@@ -337,36 +358,55 @@ impl Daemon {
             self.cfg.smart_wait_s,
             self.cfg.pause_grace_s,
         );
-        let running: Vec<String> = jobs
+        let in_way: Vec<String> = jobs
             .iter()
             .filter(|j| j.state.holds_shards())
             .map(|j| self.describe(j.id, t))
             .collect();
         let name = self.store.job(id).map(|j| j.name.clone()).unwrap_or_default();
-        let est = |p: &Plan| p.eta_s.map(fmt_dur).unwrap_or_else(|| "unknown".into());
-        let names = |ids: &[JobId]| {
-            ids.iter()
-                .filter_map(|i| self.store.job(*i).map(|j| j.name.clone()))
-                .collect::<Vec<_>>()
-                .join(", ")
+        let when = |p: &Plan| match p.eta_s {
+            Some(0) => "right away".to_string(),
+            Some(s) => format!("in about {}", fmt_dur(s)),
+            None => "when they finish (no estimate)".to_string(),
         };
+        let smart_line = match (smart.pause.is_empty(), smart.wait_for.is_empty()) {
+            (true, true) => format!("Smart: start {}", when(&smart)),
+            (true, false) => format!("Smart: wait for {}, start {}", self.names(&smart.wait_for), when(&smart)),
+            (false, true) => format!("Smart: pause {}, start {}", self.names(&smart.pause), when(&smart)),
+            (false, false) => format!(
+                "Smart: pause {}, wait for {}, start {}",
+                self.names(&smart.pause),
+                self.names(&smart.wait_for),
+                when(&smart)
+            ),
+        };
+        let pause_line = if pause.pause.is_empty() {
+            format!("Pause now: nothing can be paused, start {}", when(&pause))
+        } else {
+            format!("Pause now: pause {}, start {}", self.names(&pause.pause), when(&pause))
+        };
+        let choices = vec![smart_line, format!("Wait: pause nothing, start {}", when(&wait)), pause_line];
         let text = format!(
-            "'{name}' needs {need} shards, {} free. Running: {}.\nSmart: {}start in ~{}.\nWait: start in ~{}.\nPause now: pause {}; start in ~{}.",
+            "Needs {need} of {} shards; {} free.\nIn the way: {}.\n\n{}",
+            self.cfg.total_shards,
             p.free_now,
-            running.join("; "),
-            if smart.pause.is_empty() { String::new() } else { format!("pause {}, ", names(&smart.pause)) },
-            est(&smart),
-            est(&wait),
-            names(&pause.pause),
-            est(&pause),
+            if in_way.is_empty() {
+                "jobs ahead in the queue".to_string()
+            } else {
+                in_way.join(", ")
+            },
+            choices.join("\n")
         );
         let d = Decision {
             id: self.store.next_id(),
             job_id: id,
             kind: DecisionKind::Fit,
+            title: format!("{name} is waiting for the GPU"),
             text,
+            choices,
             options: vec!["smart".into(), "wait".into(), "pause".into()],
             recommended: "smart".into(),
+            code: new_code(),
             created_at: t,
             deadline: t + self.cfg.ask_timeout_s,
             answer: None,
@@ -392,23 +432,45 @@ impl Daemon {
             self.cfg.pause_grace_s,
         );
         let blockers: Vec<String> = p.wait_for.iter().map(|i| self.describe(*i, t)).collect();
-        let text = format!(
-            "'{}' has waited {} for the GPU. Still running: {}.",
-            j.name,
-            fmt_dur(waited),
-            if blockers.is_empty() {
-                "jobs ahead in the queue".into()
+        let pausable = sched::plan(
+            &self.store.jobs,
+            self.capacity(),
+            j.shards,
+            j.lane,
+            Mode::Pause,
+            t,
+            self.cfg.smart_wait_s,
+            self.cfg.pause_grace_s,
+        );
+        let name = j.name.clone();
+        let choices = vec![
+            if pausable.pause.is_empty() {
+                "Pause now: nothing can be paused".to_string()
             } else {
-                blockers.join("; ")
-            }
+                format!("Pause now: pause {}", self.names(&pausable.pause))
+            },
+            format!("Keep waiting: ask again in {}", fmt_dur(j.max_wait_s.max(60))),
+            format!("Cancel: stop waiting, cancel {name}"),
+        ];
+        let text = format!(
+            "Still in the way: {}.\n\n{}",
+            if blockers.is_empty() {
+                "jobs ahead in the queue".to_string()
+            } else {
+                blockers.join(", ")
+            },
+            choices.join("\n")
         );
         let d = Decision {
             id: self.store.next_id(),
             job_id: id,
             kind: DecisionKind::CheckBack,
+            title: format!("{name} has waited {}", fmt_dur(waited)),
             text,
+            choices,
             options: vec!["pause-now".into(), "keep-waiting".into(), "cancel".into()],
             recommended: "keep-waiting".into(),
+            code: new_code(),
             created_at: t,
             deadline: t + self.cfg.ask_timeout_s.max(300),
             answer: None,
@@ -418,7 +480,46 @@ impl Daemon {
         self.dirty = true;
     }
 
-    pub fn answer(&mut self, did: u64, choice: &str) -> Result<(), String> {
+    /// Answer a question. `code` must match the question's one-time code when given (phone answers carry it);
+    /// `from` is "phone", "desktop", "timeout" or empty. A phone answer and a timed-out question each get a
+    /// short follow-up alert saying what was chosen.
+    pub fn answer_from(&mut self, did: u64, choice: &str, code: Option<&str>, from: &str) -> Result<(), String> {
+        let d = self
+            .store
+            .decisions
+            .iter()
+            .find(|d| d.id == did)
+            .cloned()
+            .ok_or("no such question")?;
+        if let Some(c) = code {
+            if d.code.is_empty() || c != d.code {
+                return Err("this answer's code does not match the question".into());
+            }
+        }
+        self.apply_answer(did, choice)?;
+        let name = self.store.job(d.job_id).map(|j| j.name.clone()).unwrap_or_default();
+        let line = d
+            .options
+            .iter()
+            .position(|o| o == choice)
+            .and_then(|i| d.choices.get(i))
+            .cloned()
+            .unwrap_or_default();
+        match from {
+            "phone" => self.notifier.alert(
+                Kind::Decided,
+                &format!("{} for {name}", notify::label(choice)),
+                &format!("Answered from your phone. {line}"),
+            ),
+            "timeout" => self
+                .notifier
+                .alert(Kind::Decided, &format!("No answer: {} for {name}", notify::label(choice)), &line),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn apply_answer(&mut self, did: u64, choice: &str) -> Result<(), String> {
         let d = self
             .store
             .decisions
@@ -537,10 +638,14 @@ impl Daemon {
             exec::signal_group(pg, Signal::SIGTERM);
         }
         let (name, msg) = (j.name.clone(), why.to_string());
+        let mut why = msg.replacen("paused to make room", "to make room", 1);
+        if let Some(c) = why.get(..1) {
+            why = c.to_uppercase() + &why[1..];
+        }
         self.notifier.alert(
-            &format!("doum: pausing '{name}'"),
-            &format!("{msg}. It resumes automatically when the GPU is free."),
-            Level::Info,
+            Kind::Paused,
+            &format!("Paused {name}"),
+            &format!("{why}. It resumes on its own when the GPU is free."),
         );
         self.dirty = true;
         Ok(())
@@ -697,6 +802,7 @@ impl Daemon {
         self.reap(t);
         self.expire_questions(t);
         self.checkbacks(t);
+        self.stuck_leases(t);
         self.replan(t);
         self.start_ready(t);
         if t.saturating_sub(self.last_gpu_scan) >= 15 {
@@ -721,6 +827,11 @@ impl Daemon {
             .collect();
         for id in ids {
             self.set_reason(id);
+        }
+        if self.notifier.version() != self.saved_alerts {
+            self.saved_alerts = self.notifier.version();
+            self.store.alerts = self.notifier.all();
+            self.dirty = true;
         }
         if self.dirty {
             if let Err(e) = self.store.save(&self.paths.state_file()) {
@@ -842,17 +953,16 @@ impl Daemon {
                 };
                 let (name, st, dur) = (jm.name.clone(), jm.state, jm.started_at.map(|s| t.saturating_sub(s)).unwrap_or(0));
                 match st {
-                    State::Done => {
-                        self.notifier
-                            .alert(&format!("doum: '{name}' finished"), &format!("after {}", fmt_dur(dur)), Level::Info)
-                    }
+                    State::Done => self
+                        .notifier
+                        .alert(Kind::Finished, &format!("{name} finished"), &format!("After {}.", fmt_dur(dur))),
                     State::Failed => self.notifier.alert(
-                        &format!("doum: '{name}' failed"),
+                        Kind::Failed,
+                        &format!("{name} failed"),
                         &format!(
-                            "exit code {}; see its log: doum logs {id}",
+                            "Exit code {}. Log: doum logs {id}",
                             code.map_or_else(|| "unknown".to_string(), |c| c.to_string())
                         ),
-                        Level::Warn,
                     ),
                     _ => {}
                 }
@@ -869,7 +979,7 @@ impl Daemon {
             .map(|d| (d.id, d.recommended.clone()))
             .collect();
         for (id, rec) in due {
-            let _ = self.answer(id, &rec);
+            let _ = self.answer_from(id, &rec, None, "timeout");
         }
         // questions about jobs that are no longer waiting are moot
         let moot: Vec<u64> = self
@@ -883,6 +993,37 @@ impl Daemon {
                 d.answer = Some("moot".into());
                 self.dirty = true;
             }
+        }
+    }
+
+    /// A job that stands in for an app (a lease, like ComfyUI's) reports progress every few seconds while the app is
+    /// healthy. One that has reported before and then goes quiet for `stale_lease_s` is stuck: the app froze (it
+    /// can stay alive for a long time like that). Its shards are released, and you are told.
+    fn stuck_leases(&mut self, t: u64) {
+        if self.cfg.stale_lease_s == 0 {
+            return;
+        }
+        let stuck: Vec<(JobId, String, u32, u64)> = self
+            .store
+            .jobs
+            .iter()
+            .filter(|j| j.state == State::Running && !j.covers_pids.is_empty() && j.progress.updated_at > 0)
+            .filter(|j| t.saturating_sub(j.progress.updated_at) > self.cfg.stale_lease_s)
+            .map(|j| (j.id, j.name.clone(), j.shards, t - j.progress.updated_at))
+            .collect();
+        for (id, name, shards, quiet) in stuck {
+            let _ = self.cancel(id);
+            if let Some(j) = self.store.job_mut(id) {
+                j.reason = format!("stopped responding (no check-in for {})", fmt_dur(quiet));
+            }
+            self.notifier.alert(
+                Kind::Stuck,
+                &format!("{name} stopped responding"),
+                &format!(
+                    "No check-in for {}, so its {shards} shards are released. If it is still running, it asks again when it needs the GPU.",
+                    fmt_dur(quiet)
+                ),
+            );
         }
     }
 
@@ -978,7 +1119,7 @@ impl Daemon {
                         jm.reason = format!("could not start: {e}");
                         let name = jm.name.clone();
                         self.notifier
-                            .alert(&format!("doum: '{name}' failed"), &format!("could not start: {e}"), Level::Warn);
+                            .alert(Kind::Failed, &format!("{name} could not start"), &e.to_string());
                     }
                 }
             } else if j.detached {
@@ -1004,7 +1145,7 @@ impl Daemon {
                         jm.reason = format!("could not start: {e}");
                         let name = jm.name.clone();
                         self.notifier
-                            .alert(&format!("doum: '{name}' failed"), &format!("could not start: {e}"), Level::Warn);
+                            .alert(Kind::Failed, &format!("{name} could not start"), &e.to_string());
                     }
                 }
             } else {
@@ -1017,7 +1158,7 @@ impl Daemon {
             if let Some(jm) = self.store.job(id) {
                 if jm.requeues > 0 && jm.state == State::Running {
                     self.notifier
-                        .alert(&format!("doum: '{}' resumed", jm.name), "the GPU is free again", Level::Info);
+                        .alert(Kind::Resumed, &format!("Resumed {}", jm.name), "The GPU is free again.");
                 }
             }
             self.dirty = true;
@@ -1064,12 +1205,12 @@ impl Daemon {
         for p in &procs {
             if self.known_unmanaged.insert(p.pid) {
                 self.notifier.alert(
-                    "doum: GPU used outside the queue",
+                    Kind::Outside,
+                    "GPU used outside the queue",
                     &format!(
-                        "{} (pid {}, ~{:.0} GB) is using the GPU without doum. Run it with `doum run` so it waits its turn.",
+                        "{} (pid {}, ~{:.0} GB) is using the GPU without Doum. Run it with `doum run` so it waits its turn.",
                         p.name, p.pid, p.mem_gb
                     ),
-                    Level::Warn,
                 );
             }
         }
@@ -1101,7 +1242,15 @@ impl Daemon {
             mem_available_gb: (sys::mem_available_gb() * 10.0).round() / 10.0,
             jobs: self.store.jobs.iter().map(public).collect(),
             queue: sched::order(&self.store.jobs).iter().map(|j| j.id).collect(),
-            decisions: self.store.open_decisions().cloned().collect(),
+            decisions: self
+                .store
+                .open_decisions()
+                .map(|d| Decision {
+                    code: String::new(),
+                    ..d.clone()
+                })
+                .collect(),
+            alerts: self.notifier.recent(30),
             unmanaged: self.unmanaged_cache.clone(),
             latest: self.history.last().cloned(),
             backend: self.cfg.backend,
@@ -1118,6 +1267,16 @@ fn stop_slurm_job(cfg: &crate::config::SlurmCfg, queue: &[slurm::SlurmJob], sid:
         Some(s) if s.state == "PENDING" => slurm::cancel(cfg, sid),
         _ => slurm::signal(cfg, sid, "TERM"),
     }
+}
+
+/// A random one-time code that a phone answer must carry.
+fn new_code() -> String {
+    use std::io::Read;
+    let mut b = [0u8; 8];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut b);
+    }
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// A job as the API shows it: without its environment, which can hold the API keys of the shell that ran
@@ -1258,7 +1417,12 @@ async fn h_answer(
     Path(id): Path<u64>,
     Json(r): Json<AnswerReq>,
 ) -> ApiResult<serde_json::Value> {
-    act!(s, h, |d: &mut Daemon| d.answer(id, &r.choice))
+    act!(s, h, |d: &mut Daemon| d.answer_from(
+        id,
+        &r.choice,
+        r.code.as_deref(),
+        r.from.as_deref().unwrap_or("")
+    ))
 }
 async fn h_index() -> Html<&'static str> {
     Html(include_str!("panel.html"))
@@ -1343,6 +1507,7 @@ pub fn router(s: Shared) -> Router {
 pub async fn serve(cfg: Config, paths: Paths) -> Result<()> {
     let listen = cfg.listen.clone();
     let d = Daemon::new(cfg, paths)?;
+    notify::listen_for_answers(&d.cfg.notify, d.api.clone(), d.token.clone());
     tracing::info!("doum daemon on http://{listen} ({} jobs in state)", d.store.jobs.len());
     let shared: Shared = Arc::new(Mutex::new(d));
     let ticker = shared.clone();

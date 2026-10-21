@@ -3,6 +3,13 @@
 All notable changes to Doum are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Doum uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+- ComfyUI: a paused prompt is put back into ComfyUI's own queue, at the front, before its run ends, so it always
+  runs next. Re-queueing over HTTP a moment later let the next prompt in line run first. (Falls back to HTTP on
+  ComfyUI versions with a different queue.) Tested in CI.
+
 ## v0.2.0 (2026-10-21)
 
 ### Added

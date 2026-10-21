@@ -60,10 +60,15 @@ Environment variables of the ComfyUI process:
   process is gone and cancels the lease.
 - **Doum not running.** Prompts run without the queue, exactly as without the plugin.
 
+The interrupted prompt goes back into ComfyUI's own queue, at the front, *before* its run ends, so ComfyUI's worker
+picks it next and the rest keep their order. (Earlier versions re-queued it over the HTTP API a moment later, and
+the next prompt in line could get there first.) If a ComfyUI version stores its queue differently, the plugin falls
+back to the HTTP API. `integrations/comfyui/tests/test_requeue.py` checks the order.
+
 ### Known limits
 
-- A prompt that ComfyUI had already taken off its queue when the pause happened (it is then waiting in the gate for
-  the GPU) runs before the re-queued prompt.
+
+
 - The interrupted prompt starts again from the beginning; ComfyUI has no way to resume a half-finished prompt.
 - The lease covers all of ComfyUI at a fixed size. A workflow that needs more memory than `DOUM_COMFY_SHARDS` is not
   stopped by Doum.

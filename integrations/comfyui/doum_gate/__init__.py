@@ -216,6 +216,33 @@ def _watch():
             pass
 
 
+def _requeue_in_process(prompt_id):
+    """Put the interrupted prompt straight back into ComfyUI's own queue, at the front, before its run returns.
+    ComfyUI's worker takes the next prompt as soon as this run ends, so this is the only way to be sure the
+    interrupted prompt runs next (re-queueing over HTTP a moment later lost that race to whatever was next in line).
+    Returns False if this ComfyUI's queue looks different, so the caller falls back to HTTP."""
+    try:
+        import uuid
+
+        import server
+
+        srv = server.PromptServer.instance
+        q = srv.prompt_queue
+        with q.mutex:
+            item = next((it for it in q.currently_running.values() if len(it) >= 5 and it[1] == prompt_id), None)
+            if item is None:
+                return False
+            number = -srv.number  # how ComfyUI's own "front" works: the most negative number is taken first
+            srv.number += 1
+            new = (number, str(uuid.uuid4())) + tuple(item[2:])
+            q.put(new)
+        _log("interrupted prompt queued again at the front (in process)")
+        return True
+    except Exception as e:  # noqa: BLE001
+        _log(f"in-process re-queue not possible ({e!r}); using the HTTP API")
+        return False
+
+
 def _requeue_front(prompt, extra_data):
     def go():
         time.sleep(1)
@@ -256,8 +283,9 @@ def _install():
             if lost:
                 _unload()
                 _signal_stopped()  # now the lease holder may exit and doum can hand the GPU over
-                extra = args[0] if args else kwargs.get("extra_data", {})
-                _requeue_front(prompt, extra or {})
+                if not _requeue_in_process(prompt_id):
+                    extra = args[0] if args else kwargs.get("extra_data", {})
+                    _requeue_front(prompt, extra or {})
 
     execute._doum_gate = True
     execution.PromptExecutor.execute = execute

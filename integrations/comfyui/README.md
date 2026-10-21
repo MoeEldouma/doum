@@ -11,4 +11,4 @@ Settings (environment of the ComfyUI process): `DOUM_COMFY_SHARDS` (60), `DOUM_C
   so the next job never overlaps; the interrupted prompt is queued again at the front.
 - Doum down or missing: ComfyUI runs exactly as before.
 
-Known limit: if another prompt was already waiting, it may run before the re-queued one.
+The interrupted prompt is put back into ComfyUI's own queue before its run ends, so it always runs next.

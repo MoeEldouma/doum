@@ -4,7 +4,7 @@
 
 Local LLMs, ComfyUI image and video models, training runs and your AI coding sessions all want the same GPU. Doum is
 the queue between them: every job asks for *shards* of GPU memory, waits its turn, and gets paused and resumed when
-something more urgent needs the GPU. It talks to each app, and pings your phone when a decision is yours.
+something more urgent needs the GPU. It talks to each app, and asks your phone when a decision is yours.
 
 ![Doum demo: an interactive LLM job pauses a training run, waits for a render, then training resumes](docs/demo.gif)
 
@@ -203,14 +203,17 @@ Prefer the terminal? `doum top` shows the same queue with keyboard controls.
 Doum pushes to the free, open-source [ntfy](https://ntfy.sh) app (iOS and Android), so you know what your GPU is doing
 when you are away from the desk:
 
-| Alert | When | Priority |
+| | Alert | When |
 |---|---|---|
-| `doum: the GPU is busy` | a job does not fit and its mode is `ask`: the options, time estimates and the default | high |
-| `doum: pausing '<job>'` | a job is paused to make room (it resumes on its own) | default |
-| `doum: '<job>' resumed` | a paused job starts again | default |
-| `doum: '<job>' finished` | a background (`-d`) job completes, with how long it ran | default |
-| `doum: '<job>' failed` | a job exits non-zero (with the exit code and the `doum logs` command) | high |
-| `doum: GPU used outside the queue` | a process uses the GPU without Doum (once per process) | high |
+| ❓ | **&lt;job&gt; is waiting for the GPU**, with **Smart / Wait / Pause now** buttons | a job does not fit and its mode is `ask` |
+| ⏸️ ▶️ | **Paused &lt;job&gt;**, **Resumed &lt;job&gt;** | a job steps aside for urgent work, and comes back |
+| ✅ ❌ | **&lt;job&gt; finished**, **&lt;job&gt; failed** | a background job ends |
+| ⏳ | **&lt;job&gt; stopped responding** | an app's reservation (such as ComfyUI's) stopped checking in; its shards are released |
+| ⚠️ | **GPU used outside the queue** | a process uses the GPU without Doum |
+
+Tap a button and the answer comes back to your machine through a second private topic that Doum listens to (an
+outgoing connection; nothing is opened to the internet), checked against a one-time code. Every alert also stays in
+the panel's **Recent alerts** and in `doum alerts`.
 
 Setup takes two minutes: install the ntfy app, subscribe to a long random topic, and put its URL in
 `~/.config/doum/doum.toml` as `[notify] ntfy_url`. The full guide, with privacy notes, self-hosting and

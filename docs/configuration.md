@@ -25,6 +25,7 @@ A commented example with every key is in [`config.example.toml`](config.example.
 | `max_wait_s` | integer (s) | `1200` | Check-back: ask the user after an interactive or foreground job has waited this long. `0` turns it off. Per job: `doum run --max-wait`. |
 | `ask_timeout_s` | integer (s) | `60` | How long an `ask` question stays open before the recommendation (smart) is applied. A check-back question stays open for this or 300 s, whichever is longer. |
 | `pause_grace_s` | integer (s) | `90` | After SIGTERM, how long a paused job gets to save and exit before SIGKILL. |
+| `stale_lease_s` | integer (s) | `300` | A job that stands in for an app (a lease with `--covers-pid`, such as ComfyUI's) and has reported progress before is treated as stuck if it goes quiet this long: its shards are released and you are told. `0` turns this off. |
 | `unmanaged_min_gb` | float | `1.0` | GPU processes outside the queue that use less than this (GB) are not reported (driver contexts, idle servers). |
 
 ## `[memory]`
@@ -75,6 +76,8 @@ post_end  = ["/home/me/bin/gpu-cooldown-gate", "--finished"]
 | `desktop` | bool | `true` | Desktop notifications through D-Bus. Questions get answer buttons and stay up until their deadline. |
 | `ntfy_url` | string | `""` (off) | An ntfy topic URL for phone push, e.g. `"https://ntfy.sh/<long-random-topic>"`. Anyone who knows a topic name on a public ntfy server can read it, so make it long and random. |
 | `webhooks` | list of strings | `[]` | URLs that get a JSON POST for every alert and question. |
+| `phone_answers` | bool | `true` | Put Smart / Wait / Pause now buttons on questions sent to the phone. Answers go to a second private topic that Doum listens to (an outgoing connection), and must carry the question's one-time code. See [phone alerts](phone-alerts.md). |
+| `ntfy_answers_url` | string | `""` | The topic for phone answers. Empty: `ntfy_url` with `-answers` added. |
 
 What is sent and the webhook payload are described in [Integrations: notifications](integrations.md#notifications).
 

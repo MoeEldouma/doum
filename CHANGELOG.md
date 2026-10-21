@@ -5,6 +5,18 @@ and Doum uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+- Answer questions from your phone: ntfy buttons (Smart / Wait / Pause now) send the answer to a private answers topic
+  that Doum listens to (outgoing connection only). Each question has a one-time code, never shown in the API; you get
+  a confirmation. `[notify] phone_answers`, `ntfy_answers_url`.
+- Recent alerts are kept across restarts and shown in the panel ("Recent alerts") and by `doum alerts`.
+- A lease that has reported progress and then goes quiet for `stale_lease_s` (5 min) is released, with an alert. (A
+  frozen ComfyUI once held 60 shards for 45 minutes.)
+
+### Changed
+- Clearer alerts: plain titles ("llm-writer is waiting for the GPU", "Paused comfyui"), one line per choice, "no
+  estimate" instead of "~unknown", an icon per kind on the phone, and a follow-up when a question times out.
+
 ### Fixed
 - ComfyUI: a paused prompt is put back into ComfyUI's own queue, at the front, before its run ends, so it always
   runs next. Re-queueing over HTTP a moment later let the next prompt in line run first. (Falls back to HTTP on

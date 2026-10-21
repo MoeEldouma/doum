@@ -31,6 +31,8 @@ jobs:
         run: cargo test --all
       - name: ComfyUI plugin (pause re-queue order)
         run: python3 integrations/comfyui/tests/test_requeue.py integrations/comfyui/doum_gate/__init__.py
+      - name: end-to-end (throwaway daemon, CPU jobs)
+        run: cargo build --release && bash tests/e2e.sh target/release/doum
       - name: simulation (200k scheduling events)
         run: cargo test --release sim_ -- --nocapture
         env:

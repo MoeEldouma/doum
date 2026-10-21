@@ -31,6 +31,18 @@ GPU, so it is not part of CI; run it only when you mean to.
 The demo GIF in `docs/demo.gif` is recorded from a throwaway daemon with stand-in CPU jobs; `docs/demo/README.md`
 explains how to record it again.
 
+## Tests
+
+| What | Command | In CI |
+|---|---|---|
+| Unit tests, property tests, a short simulation | `cargo test --all` | yes |
+| The full million-event simulation | `DOUM_SIM_EVENTS=1000000 cargo test --release sim_ -- --nocapture` | 200k events |
+| End to end: a throwaway daemon with CPU jobs (pause/resume, restarts, cancel, API security, agent limits, re-planning) | `cargo build --release && bash tests/e2e.sh` | yes |
+| The same on the Slurm backend (needs Slurm with GPU shards, see `deploy/slurm`) | `DOUM_E2E_BACKEND=slurm bash tests/e2e.sh` | no |
+| ComfyUI plugin: a paused prompt runs next | `python3 integrations/comfyui/tests/test_requeue.py integrations/comfyui/doum_gate/__init__.py` | yes |
+| Real GPU: an LLM through llama-swap | `bash tests/llm_cycle.sh` | no (needs a GPU) |
+| Real GPU: ComfyUI pause demo with screenshots | `python3 docs/demo/comfyui/run_demo.py` | no (needs ComfyUI and Flux) |
+
 ## Issues
 
 Please include:

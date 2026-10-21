@@ -4,6 +4,7 @@
 mod client;
 mod config;
 mod daemon;
+mod doctor;
 mod exec;
 mod hook;
 mod job;
@@ -12,6 +13,7 @@ mod metrics;
 mod notify;
 mod prom;
 mod sched;
+mod slurm;
 mod store;
 mod sys;
 mod tui;
@@ -103,6 +105,8 @@ enum Cmd {
     },
     /// Live terminal view with controls (like htop for the GPU queue).
     Top,
+    /// Check the whole setup (daemon, GPU, freeze support, Slurm, alerts) and say what to fix.
+    Doctor,
     /// Open the web panel in your browser (and unlock its controls).
     Panel,
     /// MCP server on stdio, for AI agents (e.g. `claude mcp add doum -- doum mcp`).
@@ -217,6 +221,7 @@ fn real_main(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Top => tui::run(&Client::new(&cfg, &paths)?),
+        Cmd::Doctor => std::process::exit(doctor::run(&cfg, &paths)),
         Cmd::Mcp => mcp::serve(cfg, paths),
         Cmd::ClaudeHook => std::process::exit(hook::run(&cfg.claude_hook)),
         Cmd::Panel => {
@@ -489,6 +494,19 @@ fn print_status(s: &StatusView, all: bool) {
                 d.options.join("|"),
                 d.recommended,
                 fmt_dur(d.deadline.saturating_sub(s.now))
+            );
+        }
+    }
+    if !s.external.is_empty() {
+        println!("\nSLURM JOBS (submitted outside Doum, counted against the GPU)");
+        for e in &s.external {
+            println!(
+                "  slurm {:<6} {:<24} {:>4} shards  {:<10} {}",
+                e.id,
+                e.name,
+                e.shards,
+                e.state.to_lowercase(),
+                e.user
             );
         }
     }

@@ -14,12 +14,13 @@ use std::process::Child;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::config::{Config, Paths};
+use crate::config::{Backend, Config, Paths};
 use crate::exec;
 use crate::job::{now, Job, JobId, Lane, Mode, Progress, State};
 use crate::metrics::{self, History, Sample};
 use crate::notify::{Level, Notifier};
 use crate::sched::{self, Plan};
+use crate::slurm;
 use crate::store::{Decision, DecisionKind, Store};
 use crate::sys;
 
@@ -33,6 +34,10 @@ pub struct Daemon {
     notifier: Notifier,
     known_unmanaged: HashSet<i32>,
     unmanaged_cache: Vec<sys::GpuProc>,
+    /// Slurm's queue (all users), refreshed every tick under the Slurm backend.
+    slurm_jobs: Vec<slurm::SlurmJob>,
+    /// The last `squeue` worked (so a job missing from it has really left Slurm).
+    slurm_seen: bool,
     last_gpu_scan: u64,
     last_prune: u64,
     last_sample: u64,
@@ -102,6 +107,12 @@ pub struct StatusView {
     pub unmanaged: Vec<sys::GpuProc>,
     #[serde(default)]
     pub latest: Option<Sample>,
+    /// `native` or `slurm`.
+    #[serde(default)]
+    pub backend: Backend,
+    /// Slurm jobs that are not Doum's (submitted with plain sbatch/srun), with the shards they hold.
+    #[serde(default)]
+    pub external: Vec<slurm::SlurmJob>,
     pub now: u64,
 }
 
@@ -142,12 +153,27 @@ impl Daemon {
             notifier,
             known_unmanaged: HashSet::new(),
             unmanaged_cache: vec![],
+            slurm_jobs: vec![],
+            slurm_seen: false,
             last_gpu_scan: 0,
             last_prune: 0,
             last_sample: 0,
             history: History::default(),
             dirty: true,
         })
+    }
+
+    /// Shards Doum can hand out: the configured total minus what plain Slurm jobs (not Doum's) hold.
+    fn capacity(&self) -> u32 {
+        self.cfg.total_shards.saturating_sub(self.external_shards())
+    }
+
+    fn external_shards(&self) -> u32 {
+        self.slurm_jobs
+            .iter()
+            .filter(|j| !j.is_doum() && j.holds_gpu())
+            .map(|j| j.shards)
+            .sum()
     }
 
     fn mem_for(&self, j: &Job) -> f64 {
@@ -209,6 +235,7 @@ impl Daemon {
             progress: Progress::default(),
             exit_code: None,
             energy_j: 0.0,
+            slurm_id: None,
             pid: r.client_pid,
             log: None,
             reason: "queued".into(),
@@ -219,7 +246,7 @@ impl Daemon {
 
         let p = sched::plan(
             &self.store.jobs,
-            self.cfg.total_shards,
+            self.capacity(),
             need,
             mode,
             t,
@@ -249,7 +276,7 @@ impl Daemon {
     fn open_fit_question(&mut self, id: JobId, need: u32, p: &Plan) -> Decision {
         let t = now();
         let jobs = &self.store.jobs;
-        let total = self.cfg.total_shards;
+        let total = self.capacity();
         let smart = sched::plan(jobs, total, need, Mode::Smart, t, self.cfg.smart_wait_s, self.cfg.pause_grace_s);
         let pause = sched::plan(jobs, total, need, Mode::Pause, t, self.cfg.smart_wait_s, self.cfg.pause_grace_s);
         let wait = sched::plan(jobs, total, need, Mode::Wait, t, self.cfg.smart_wait_s, self.cfg.pause_grace_s);
@@ -299,7 +326,7 @@ impl Daemon {
         let waited = t.saturating_sub(j.pending_since);
         let p = sched::plan(
             &self.store.jobs,
-            self.cfg.total_shards,
+            self.capacity(),
             j.shards,
             Mode::Wait,
             t,
@@ -362,7 +389,7 @@ impl Daemon {
                     if j.state == State::Pending {
                         let p = sched::plan(
                             &self.store.jobs,
-                            self.cfg.total_shards,
+                            self.capacity(),
                             j.shards,
                             mode,
                             t,
@@ -377,7 +404,7 @@ impl Daemon {
                 if let Some(j) = self.store.job(d.job_id).cloned() {
                     let p = sched::plan(
                         &self.store.jobs,
-                        self.cfg.total_shards,
+                        self.capacity(),
                         j.shards,
                         Mode::Pause,
                         t,
@@ -434,7 +461,9 @@ impl Daemon {
         j.state = State::Pausing;
         j.pausing_since = Some(t);
         j.reason = format!("{why}: saving and stopping");
-        if let Some(pg) = j.pid {
+        if let Some(sid) = j.slurm_id {
+            stop_slurm_job(&self.cfg.slurm, &self.slurm_jobs, sid);
+        } else if let Some(pg) = j.pid {
             exec::signal_group(pg, Signal::SIGTERM);
         }
         let (name, msg) = (j.name.clone(), why.to_string());
@@ -463,7 +492,9 @@ impl Daemon {
                 j.state = State::Running;
                 j.exit_code = Some(-1);
                 j.pausing_since = Some(t); // SIGKILL after the grace period, as for a pause
-                if let Some(pg) = j.pid {
+                if let Some(sid) = j.slurm_id {
+                    stop_slurm_job(&self.cfg.slurm, &self.slurm_jobs, sid);
+                } else if let Some(pg) = j.pid {
                     exec::signal_group(pg, Signal::SIGTERM);
                 }
             }
@@ -520,7 +551,22 @@ impl Daemon {
     }
 
     fn set_reason(&mut self, id: JobId) {
-        let total = self.cfg.total_shards;
+        let held_by_slurm = self.store.job(id).and_then(|j| j.slurm_id).and_then(|sid| {
+            self.slurm_jobs
+                .iter()
+                .find(|s| s.id == sid && s.state == "PENDING")
+                .map(|s| s.reason.clone())
+        });
+        if let Some(j) = self.store.job_mut(id) {
+            if let (State::Running, Some(sid)) = (j.state, j.slurm_id) {
+                j.reason = match held_by_slurm {
+                    Some(why) => format!("waiting in Slurm: {why}"),
+                    None => format!("running as Slurm job {sid}"),
+                };
+                return;
+            }
+        }
+        let total = self.capacity();
         let free = sched::free_shards(&self.store.jobs, total);
         let open = self.store.open_decisions().any(|d| d.job_id == id);
         let pos = sched::order(&self.store.jobs).iter().position(|j| j.id == id);
@@ -546,6 +592,15 @@ impl Daemon {
     /// One scheduling pass. Called every second.
     pub fn tick(&mut self) {
         let t = now();
+        if self.cfg.backend == Backend::Slurm {
+            match slurm::queue(&self.cfg.slurm, self.cfg.total_shards) {
+                Some(q) => {
+                    self.slurm_jobs = q;
+                    self.slurm_seen = true;
+                }
+                None => self.slurm_seen = false,
+            }
+        }
         self.reap(t);
         self.expire_questions(t);
         self.checkbacks(t);
@@ -562,7 +617,13 @@ impl Daemon {
             self.store.prune(t, 7 * 86400);
             self.dirty = true;
         }
-        let ids: Vec<JobId> = self.store.jobs.iter().filter(|j| j.state == State::Pending).map(|j| j.id).collect();
+        let ids: Vec<JobId> = self
+            .store
+            .jobs
+            .iter()
+            .filter(|j| j.state == State::Pending || (j.state == State::Running && j.slurm_id.is_some()))
+            .map(|j| j.id)
+            .collect();
         for id in ids {
             self.set_reason(id);
         }
@@ -622,13 +683,29 @@ impl Daemon {
                 continue;
             }
             // detached: reap our child, or check the pid after a daemon restart
-            let finished = match self.children.get_mut(&id) {
-                Some(c) => matches!(c.try_wait(), Ok(Some(_))),
-                None => !j.pid.is_some_and(sys::pid_alive),
+            let finished = if let Some(sid) = j.slurm_id {
+                // the command's process group, once `_exec` has started it (for display and GPU-process matching)
+                if j.pid.is_none() {
+                    if let (Some(pg), Some(jm)) = (exec::child_pgid(&self.paths, id, j.requeues), self.store.job_mut(id)) {
+                        jm.pid = Some(pg);
+                    }
+                }
+                let gone = self.slurm_seen
+                    && t.saturating_sub(j.started_at.unwrap_or(t)) > 10
+                    && !self.slurm_jobs.iter().any(|s| s.id == sid && s.is_active());
+                exec::read_exit(&self.paths, id, j.requeues).is_some() || gone
+            } else {
+                match self.children.get_mut(&id) {
+                    Some(c) => matches!(c.try_wait(), Ok(Some(_))),
+                    None => !j.pid.is_some_and(sys::pid_alive),
+                }
             };
             if !finished {
                 let stopping = j.state == State::Pausing || j.exit_code == Some(-1);
                 if stopping && j.pausing_since.is_some_and(|s| t.saturating_sub(s) > grace) {
+                    if let Some(sid) = j.slurm_id {
+                        slurm::signal(&self.cfg.slurm, sid, "KILL");
+                    }
                     if let Some(pg) = j.pid {
                         exec::signal_group(pg, Signal::SIGKILL);
                     }
@@ -652,6 +729,7 @@ impl Daemon {
                 }
                 jm.started_at = None;
                 jm.pid = None;
+                jm.slurm_id = None;
                 jm.reason = "paused; resumes when the GPU is free".into();
             } else {
                 jm.ended_at = Some(t);
@@ -742,9 +820,34 @@ impl Daemon {
                 .filter(|j| j.paused_for.is_some_and(|b| waiting.contains(&b)))
                 .map(|j| j.id),
         );
-        for id in sched::to_start(&self.store.jobs, self.cfg.total_shards, &held) {
+        for id in sched::to_start(&self.store.jobs, self.capacity(), &held) {
             let Some(j) = self.store.job(id).cloned() else { continue };
-            if j.detached {
+            if j.detached && self.cfg.backend == Backend::Slurm {
+                let mem = self.mem_for(&j);
+                match slurm::submit(&self.cfg.slurm, &self.paths, &j, mem, &self.api, &self.token) {
+                    Ok(sid) => {
+                        let log = self.paths.log_file(id, &j.name).display().to_string();
+                        let jm = self.store.job_mut(id).unwrap();
+                        jm.state = State::Running;
+                        jm.started_at = Some(t);
+                        jm.paused_for = None;
+                        jm.top = false;
+                        jm.pid = None;
+                        jm.slurm_id = Some(sid);
+                        jm.log = Some(log);
+                        jm.reason = format!("running as Slurm job {sid}");
+                    }
+                    Err(e) => {
+                        let jm = self.store.job_mut(id).unwrap();
+                        jm.state = State::Failed;
+                        jm.ended_at = Some(t);
+                        jm.reason = format!("could not start: {e}");
+                        let name = jm.name.clone();
+                        self.notifier
+                            .alert(&format!("doum: '{name}' failed"), &format!("could not start: {e}"), Level::Warn);
+                    }
+                }
+            } else if j.detached {
                 let mem = self.mem_for(&j);
                 match exec::spawn_detached(&self.paths, &j, mem, &self.api, &self.token) {
                     Ok(child) => {
@@ -810,7 +913,7 @@ impl Daemon {
         }
         self.history.push(Sample {
             t,
-            used_shards: sched::used_shards(&self.store.jobs),
+            used_shards: sched::used_shards(&self.store.jobs) + self.external_shards(),
             mem_free_gb: (sys::mem_available_gb() * 10.0).round() / 10.0,
             gpu_c,
             gpu_w,
@@ -860,15 +963,26 @@ impl Daemon {
     pub fn status(&self) -> StatusView {
         StatusView {
             total_shards: self.cfg.total_shards,
-            used_shards: sched::used_shards(&self.store.jobs),
+            used_shards: sched::used_shards(&self.store.jobs) + self.external_shards(),
             mem_available_gb: (sys::mem_available_gb() * 10.0).round() / 10.0,
             jobs: self.store.jobs.iter().map(public).collect(),
             queue: sched::order(&self.store.jobs).iter().map(|j| j.id).collect(),
             decisions: self.store.open_decisions().cloned().collect(),
             unmanaged: self.unmanaged_cache.clone(),
             latest: self.history.last().cloned(),
+            backend: self.cfg.backend,
+            external: self.slurm_jobs.iter().filter(|j| !j.is_doum() && j.is_active()).cloned().collect(),
             now: now(),
         }
+    }
+}
+
+/// Ask a Slurm job to stop: SIGTERM if it is running (so it can save a checkpoint), cancel if Slurm has not
+/// started it yet (a pending job can't be signalled).
+fn stop_slurm_job(cfg: &crate::config::SlurmCfg, queue: &[slurm::SlurmJob], sid: u64) {
+    match queue.iter().find(|s| s.id == sid) {
+        Some(s) if s.state == "PENDING" => slurm::cancel(cfg, sid),
+        _ => slurm::signal(cfg, sid, "TERM"),
     }
 }
 

@@ -118,6 +118,9 @@ pub struct Job {
     /// GPU energy attributed to this job so far (joules): GPU power split between running jobs by shards.
     #[serde(default)]
     pub energy_j: f64,
+    /// The Slurm job id while it runs under the Slurm backend.
+    #[serde(default)]
+    pub slurm_id: Option<u64>,
     /// pid of the process group leader (detached) or of the `doum run` client (foreground).
     pub pid: Option<i32>,
     pub log: Option<String>,

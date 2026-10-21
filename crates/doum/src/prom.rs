@@ -26,6 +26,12 @@ pub fn render(v: &StatusView) -> String {
 
     metric("doum_up", "gauge", "1 while the daemon is answering.", one(1.0));
     metric(
+        "doum_backend",
+        "gauge",
+        "Who runs background jobs.",
+        vec![(format!("{{backend=\"{}\"}}", lower(v.backend)), 1.0)],
+    );
+    metric(
         "doum_shards_total",
         "gauge",
         "GPU memory shards (about 1 GB each).",
@@ -99,6 +105,12 @@ pub fn render(v: &StatusView) -> String {
         v.jobs.iter().map(|j| (format!("{{{}}}", jl(j)), j.requeues as f64)).collect(),
     );
     metric(
+        "doum_external_shards",
+        "gauge",
+        "Shards held by Slurm jobs that are not Doum's.",
+        one(v.external.iter().filter(|e| e.holds_gpu()).map(|e| e.shards).sum::<u32>() as f64),
+    );
+    metric(
         "doum_decisions_open",
         "gauge",
         "Questions waiting for an answer (mode = ask).",
@@ -150,6 +162,8 @@ mod tests {
             decisions: vec![],
             unmanaged: vec![],
             latest: None,
+            backend: Default::default(),
+            external: vec![],
             now: 200,
         };
         let t = render(&v);

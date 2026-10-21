@@ -27,12 +27,54 @@ pub struct Config {
     pub pause_grace_s: u64,
     /// GPU processes outside the queue smaller than this (GB) are not reported (driver contexts, idle servers).
     pub unmanaged_min_gb: f64,
+    /// Who runs background jobs: `native` (Doum itself) or `slurm` (Doum decides, Slurm runs them).
+    pub backend: Backend,
+    pub slurm: SlurmCfg,
     pub memory: MemoryCfg,
     pub hooks: Hooks,
     pub notify: NotifyCfg,
     pub comfyui: ComfyCfg,
     pub mcp: McpCfg,
     pub claude_hook: ClaudeHookCfg,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    #[default]
+    Native,
+    Slurm,
+}
+
+/// The Slurm backend: partitions per lane, the GRES name for shards, and the Slurm commands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SlurmCfg {
+    pub interactive_partition: String,
+    pub batch_partition: String,
+    /// GRES name of the GPU shards in gres.conf.
+    pub gres: String,
+    /// Extra `sbatch` arguments for every job, e.g. `["--qos=normal"]`.
+    pub extra_args: Vec<String>,
+    pub sbatch: String,
+    pub squeue: String,
+    pub scancel: String,
+    pub sinfo: String,
+}
+
+impl Default for SlurmCfg {
+    fn default() -> Self {
+        Self {
+            interactive_partition: "interactive".into(),
+            batch_partition: "batch".into(),
+            gres: "shard".into(),
+            extra_args: vec![],
+            sbatch: "sbatch".into(),
+            squeue: "squeue".into(),
+            scancel: "scancel".into(),
+            sinfo: "sinfo".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +185,8 @@ impl Default for Config {
             ask_timeout_s: 60,
             pause_grace_s: 90,
             unmanaged_min_gb: 1.0,
+            backend: Backend::Native,
+            slurm: SlurmCfg::default(),
             memory: MemoryCfg::default(),
             hooks: Hooks::default(),
             notify: NotifyCfg::default(),

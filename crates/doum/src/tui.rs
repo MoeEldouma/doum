@@ -342,14 +342,27 @@ fn draw_side(f: &mut Frame, app: &App, area: Rect, now: u64) {
             .style(Style::default().fg(SAND)),
         parts[2],
     );
-    let outside: Vec<Line> = if s.unmanaged.is_empty() {
-        vec![Line::from("nothing")]
-    } else {
+    let mut outside: Vec<Line> = s
+        .external
+        .iter()
+        .map(|e| {
+            Line::from(format!(
+                "slurm {} {} · {} shards · {}",
+                e.id,
+                e.name,
+                e.shards,
+                e.state.to_lowercase()
+            ))
+        })
+        .collect();
+    outside.extend(
         s.unmanaged
             .iter()
-            .map(|p| Line::from(format!("{} (pid {}) ~{:.1} GB", p.name, p.pid, p.mem_gb)))
-            .collect()
-    };
+            .map(|p| Line::from(format!("{} (pid {}) ~{:.1} GB", p.name, p.pid, p.mem_gb))),
+    );
+    if outside.is_empty() {
+        outside.push(Line::from("nothing"));
+    }
     f.render_widget(
         Paragraph::new(outside).block(Block::default().borders(Borders::ALL).title(" outside the queue ")),
         parts[3],

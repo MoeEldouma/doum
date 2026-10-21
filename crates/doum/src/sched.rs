@@ -157,6 +157,7 @@ pub(crate) mod tests {
             progress: Progress::default(),
             exit_code: None,
             energy_j: 0.0,
+            slurm_id: None,
             pid: None,
             log: None,
             reason: String::new(),

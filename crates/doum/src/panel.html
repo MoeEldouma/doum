@@ -145,11 +145,13 @@ function jobRow(j, now, kind) {
 // the shard bar: one segment per running job, kept between refreshes so widths animate instead of jumping
 function renderBar(running, s) {
   const bar = $("bar"), keep = new Set();
-  for (const j of running) {
+  const ext = (s.external || []).filter((e) => ["RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"].includes(e.state))
+    .map((e) => ({ id: `x${e.id}`, name: `slurm: ${e.name}`, shards: e.shards, state: "running", ext: true }));
+  for (const j of [...running, ...ext]) {
     keep.add(String(j.id));
     let el = bar.querySelector(`span[data-id="${j.id}"]`);
     if (!el) {
-      el = document.createElement("span"); el.dataset.id = j.id; el.style.background = color(j.id);
+      el = document.createElement("span"); el.dataset.id = j.id; el.style.background = j.ext ? "#5d6b66" : color(j.id);
       bar.insertBefore(el, bar.querySelector(".want")); requestAnimationFrame(() => requestAnimationFrame(() => el.style.width = `${(100 * j.shards) / s.total_shards}%`));
     } else el.style.width = `${(100 * j.shards) / s.total_shards}%`;
     el.textContent = j.shards >= 10 ? j.name : "";
@@ -199,6 +201,7 @@ function render(s) {
     `<span class="chip"><b>${s.used_shards}</b>/${s.total_shards} shards</span>`,
     `<span class="chip"><b>${s.mem_available_gb.toFixed(0)}</b> GB free</span>`,
   ];
+  if (s.backend === "slurm") chips.push(`<span class="chip">backend <b>slurm</b></span>`);
   if (L.gpu_c != null) chips.push(`<span class="chip ${L.gpu_c >= 80 ? "hot" : ""}">GPU <b>${L.gpu_c}</b>°C · ${L.gpu_w ?? "?"} W</span>`);
   if (L.soc_c != null) chips.push(`<span class="chip ${L.soc_c >= 85 ? "hot" : L.soc_c >= 75 ? "warn" : ""}">SoC <b>${L.soc_c}</b>°C</span>`);
   $("chips").innerHTML = chips.join("");
@@ -213,7 +216,8 @@ function render(s) {
 
   $("questions").innerHTML = s.decisions.map((d) => `<div class="q"><p>${esc(d.text)}</p><div class="acts">${d.options.map((o) => `<button class="${o === d.recommended ? "rec" : ""}" onclick="act('/api/decisions/${d.id}',{choice:'${o}'})">${label[o] || o}</button>`).join("")}<span class="dl">default ${label[d.recommended] || d.recommended} in ${dur(Math.max(0, d.deadline - now))}</span></div></div>`).join("") || `<div class="empty">none</div>`;
 
-  $("outside").innerHTML = s.unmanaged.map((p) => `<div class="job"><div><span class="name">${esc(p.name)}</span><div class="meta">pid ${p.pid} · ~${p.mem_gb.toFixed(1)} GB · not waiting its turn</div></div></div>`).join("") || `<div class="empty">nothing</div>`;
+  const slurmRows = (s.external || []).map((e) => `<div class="job"><div><span class="name">${esc(e.name)}</span><span class="lane">slurm ${e.id}</span><div class="meta">${e.shards} shards · ${esc(e.state.toLowerCase())}${e.state === "PENDING" && e.reason && e.reason !== "None" ? ` (${esc(e.reason)})` : ""} · ${esc(e.user)} · submitted outside Doum, counted against the GPU</div></div></div>`).join("");
+  $("outside").innerHTML = slurmRows + s.unmanaged.map((p) => `<div class="job"><div><span class="name">${esc(p.name)}</span><div class="meta">pid ${p.pid} · ~${p.mem_gb.toFixed(1)} GB · not waiting its turn</div></div></div>`).join("") || `<div class="empty">nothing</div>`;
 
   const fin = jobs.filter((j) => ["done", "failed", "cancelled"].includes(j.state)).sort((a, b) => (b.ended_at || 0) - (a.ended_at || 0)).slice(0, 12);
   $("finished").innerHTML = fin.length ? `<div class="fin">${fin.map((j) => `<span>#${j.id}</span><span>${esc(j.name)}</span><span class="${j.state}">${j.state}</span><span>${energy(j.energy_j)}</span>`).join("")}</div>` : `<div class="empty">none yet</div>`;

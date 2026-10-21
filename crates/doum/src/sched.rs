@@ -247,6 +247,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_stale_estimate_stops_counting() {
+        // ComfyUI said "5 min left" at t=1000. At t=1300 it's due, at t=1450 it is late but within the margin
+        // (half the estimate), at t=1500 the promise is stale: unknown, so smart mode pauses it after all.
+        let comfy = with_eta(job(1, Lane::Batch, 60, State::Running, 0), 300, 1000);
+        assert_eq!(comfy.eta_left(1100), Some(200));
+        assert_eq!(comfy.eta_left(1450), Some(0));
+        assert!(!comfy.overran(1450));
+        assert_eq!(comfy.eta_left(1500), None);
+        assert!(comfy.overran(1500));
+        // a short estimate still gets at least a minute of slack
+        let quick = with_eta(job(3, Lane::Batch, 4, State::Running, 0), 20, 1000);
+        assert_eq!(quick.eta_left(1070), Some(0));
+        assert_eq!(quick.eta_left(1081), None);
+
+        let train = with_eta(job(2, Lane::Batch, 24, State::Running, 0), 7200, 1000);
+        let jobs = vec![comfy, train];
+        let early = plan(&jobs, 110, 110, Mode::Smart, 1100, 600, 90);
+        assert_eq!((early.pause.clone(), early.wait_for.clone()), (vec![2], vec![1]));
+        let late = plan(&jobs, 110, 110, Mode::Smart, 1500, 600, 90);
+        assert_eq!(late.pause.len(), 2, "the overrun render is paused too");
+        assert!(late.wait_for.is_empty());
+    }
+
+    #[test]
+    fn a_job_without_an_estimate_never_overruns() {
+        let j = job(1, Lane::Batch, 10, State::Running, 0);
+        assert!(!j.overran(1_000_000));
+    }
+
+    #[test]
     fn pause_mode_pauses_both() {
         let now = 1000;
         let jobs = vec![
@@ -292,6 +322,7 @@ pub(crate) mod tests {
     fn eta_ages_since_report() {
         let j = with_eta(job(1, Lane::Batch, 1, State::Running, 0), 300, 1000);
         assert_eq!(j.eta_left(1100), Some(200));
-        assert_eq!(j.eta_left(2000), Some(0));
+        assert_eq!(j.eta_left(1400), Some(0)); // due, still within the margin
+        assert_eq!(j.eta_left(2000), None); // long overdue: the estimate no longer counts
     }
 }

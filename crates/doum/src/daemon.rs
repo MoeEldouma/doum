@@ -41,6 +41,7 @@ pub struct Daemon {
     last_gpu_scan: u64,
     last_prune: u64,
     last_sample: u64,
+    last_replan: u64,
     pub history: History,
     dirty: bool,
 }
@@ -158,6 +159,7 @@ impl Daemon {
             last_gpu_scan: 0,
             last_prune: 0,
             last_sample: 0,
+            last_replan: 0,
             history: History::default(),
             dirty: true,
         })
@@ -430,6 +432,11 @@ impl Daemon {
     }
 
     fn apply_plan(&mut self, for_job: JobId, p: &Plan) {
+        self.apply_plan_why(for_job, p, "")
+    }
+
+    /// `why` is added in front of each paused job's reason, e.g. "ran past its estimate; ".
+    fn apply_plan_why(&mut self, for_job: JobId, p: &Plan, why: &str) {
         if p.pause.is_empty() {
             return;
         }
@@ -440,7 +447,12 @@ impl Daemon {
             j.top = true;
         }
         for id in p.pause.clone() {
-            if self.pause(id, &format!("paused to make room for '{name}'")).is_ok() {
+            let lead = if why.is_empty() || !self.store.job(id).is_some_and(|j| j.overran(now())) {
+                ""
+            } else {
+                why
+            };
+            if self.pause(id, &format!("{lead}paused to make room for '{name}'")).is_ok() {
                 if let Some(j) = self.store.job_mut(id) {
                     j.paused_for = Some(for_job);
                 }
@@ -604,6 +616,7 @@ impl Daemon {
         self.reap(t);
         self.expire_questions(t);
         self.checkbacks(t);
+        self.replan(t);
         self.start_ready(t);
         if t.saturating_sub(self.last_gpu_scan) >= 15 {
             self.last_gpu_scan = t;
@@ -788,6 +801,39 @@ impl Daemon {
                 d.answer = Some("moot".into());
                 self.dirty = true;
             }
+        }
+    }
+
+    /// A smart decision is only as good as the estimates it used. Every 15 s, look again at the job at the front
+    /// of the queue: if it still doesn't fit and its mode would now pause something (a job it waited for ran
+    /// past its estimate, or reported a longer one), do that. Ask-mode jobs get the check-back question instead.
+    fn replan(&mut self, t: u64) {
+        if t.saturating_sub(self.last_replan) < 15 {
+            return;
+        }
+        self.last_replan = t;
+        if self.store.jobs.iter().any(|j| j.state == State::Pausing) {
+            return; // already making room
+        }
+        let Some(head) = sched::order(&self.store.jobs).first().map(|j| (j.id, j.shards, j.mode)) else {
+            return;
+        };
+        let (id, need, mode) = head;
+        if !matches!(mode, Mode::Smart | Mode::Pause) || self.store.open_decisions().any(|d| d.job_id == id) {
+            return;
+        }
+        let p = sched::plan(
+            &self.store.jobs,
+            self.capacity(),
+            need,
+            mode,
+            t,
+            self.cfg.smart_wait_s,
+            self.cfg.pause_grace_s,
+        );
+        if need > p.free_now && !p.pause.is_empty() {
+            tracing::info!("re-plan for job {id}: pausing {:?}", p.pause);
+            self.apply_plan_why(id, &p, "ran past its estimate; ");
         }
     }
 

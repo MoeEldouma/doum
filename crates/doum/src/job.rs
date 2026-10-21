@@ -131,9 +131,21 @@ pub struct Job {
 
 impl Job {
     /// Seconds left according to the job's last progress report, aged by the time since that report.
+    /// A job well past its estimate (by half the estimate, at least a minute) no longer has a trustworthy one:
+    /// `None`, the same as a job that never said, so smart decisions stop waiting on a stale promise.
     pub fn eta_left(&self, now: u64) -> Option<u64> {
         let p = &self.progress;
-        p.eta_s.map(|eta| eta.saturating_sub(now.saturating_sub(p.updated_at)))
+        let eta = p.eta_s?;
+        let since = now.saturating_sub(p.updated_at);
+        if since > eta + (eta / 2).max(60) {
+            return None;
+        }
+        Some(eta.saturating_sub(since))
+    }
+
+    /// Ran past its last estimate (by the same margin as `eta_left`).
+    pub fn overran(&self, now: u64) -> bool {
+        self.progress.eta_s.is_some() && self.eta_left(now).is_none()
     }
 
     pub fn pausable(&self) -> bool {

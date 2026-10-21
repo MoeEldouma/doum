@@ -13,7 +13,6 @@ First public release. Linux only; tested on one NVIDIA GB10 (128 GB unified memo
   from each job's ETA, and new jobs sliding in. Jobs keep the start and end of each paused run (`runs`).
 - An alert when a job cannot be started at all.
 - Docs: phone alerts guide (docs/phone-alerts.md), panel and phone demo media (docs/media/).
-
 - Native GPU queue in a single daemon (`doum daemon`, `127.0.0.1:8420`): jobs reserve memory shards (~1 GB each,
   110 by default) and start only when their shards are free.
 - Two lanes: interactive before batch; strict order (nothing starts past a waiting job at the front); `doum up` to

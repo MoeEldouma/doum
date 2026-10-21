@@ -3,7 +3,7 @@
 All notable changes to Doum are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Doum uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased (v0.2)
+## v0.2.0 (2026-10-21)
 
 ### Added
 - Slurm backend (`backend = "slurm"`): Doum decides, Slurm runs. Background jobs are submitted with `sbatch

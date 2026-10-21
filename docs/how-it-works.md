@@ -61,8 +61,19 @@ is a *plan*: which running jobs to pause, which to wait for, and an estimated st
 When a plan pauses jobs, the new job is moved to the front of its lane, and the paused jobs are marked as paused for
 it (see *held* above).
 
-The plan is not re-evaluated later. If a job that was let finish runs longer than it said, the new job keeps waiting;
-the check-back handles that.
+### Re-planning when an estimate goes stale
+
+A smart plan is only as good as the estimates it used, so the daemon looks again every 15 seconds at the job at the
+front of the queue. Two things change a plan:
+
+- **A stale estimate.** A job's time left is its last `doum progress --eta`, aged by the time since that report. Once a
+  job is past its estimate by half the estimate (at least a minute), the estimate no longer counts: the job is treated
+  like one that never gave an ETA. A render that said "5 minutes left" is waited for until 7.5 minutes have passed.
+- **A longer estimate.** A job that reports a new, longer ETA beyond `smart_wait_s` no longer qualifies to be waited for.
+
+If the front job's mode is `smart` or `pause` and its plan now pauses something, that happens straight away, and the
+paused job's reason (and alert) says it *ran past its estimate*. Ask-mode jobs don't act on their own; the
+check-back asks you instead. `wait` never pauses anything.
 
 ### Check-back
 

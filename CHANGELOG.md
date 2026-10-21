@@ -3,6 +3,23 @@
 All notable changes to Doum are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Doum uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased (v0.2)
+
+### Added
+- Slurm backend (`backend = "slurm"`): Doum decides, Slurm runs. Background jobs are submitted with `sbatch
+  --gres=shard:N` to the lane's partition and show in `squeue` as `doum-<id>-<name>`; pause and cancel go through
+  `scancel` (SIGTERM, SIGKILL after the grace period; a job Slurm hasn't started is cancelled); a restarted daemon picks
+  Slurm jobs up by their Slurm id. Plain Slurm jobs that are not Doum's count against the GPU and show in `doum status`,
+  the panel, `doum top` and `/metrics` (`doum_external_shards`, `doum_backend`).
+- `doum doctor`: checks the daemon, state directory, GPU and driver, whether jobs can be frozen in place, the Slurm
+  partitions and shards, and alerts.
+- Re-planning: estimates well past due count as unknown, and the job at the front of the queue is re-planned every 15 s,
+  so a job that ran past its estimate is paused instead of being waited on forever.
+
+### Changed
+- `deploy/slurm`: the backfill scheduler (Slurm 23.11 without an accounting database only starts jobs in the backfill
+  pass) and no time limit on the interactive partition.
+
 ## v0.1.0 (2026-10-21)
 
 First public release. Linux only; tested on one NVIDIA GB10 (128 GB unified memory).

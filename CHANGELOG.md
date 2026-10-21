@@ -21,6 +21,12 @@ and Doum uses [Semantic Versioning](https://semver.org/).
   finished).
 
 ### Fixed
+- The Claude hook checks each part of a compound command: `echo doum; ollama run x` used to pass because the command
+  mentioned `doum`.
+- The memory check uses the GPU's own free memory when the card reports it (discrete GPUs), not system RAM.
+- Agent limits (`[mcp]` max shards, max jobs, mode) are enforced by the daemon too, for every job submitted as owner
+  `agent`.
+- Exit records are removed once a job has finished, and logs when Doum forgets the job (7 days after it finished).
 - Two deadlocks found by the simulator: smart mode could pause an interactive job for a batch job, which then sat ahead
   of it while held for it; and a job's "paused for" mark outlived the job it was for, so two jobs could end up held for
   each other. Nothing pauses a higher lane now, and the mark is cleared when that job starts.

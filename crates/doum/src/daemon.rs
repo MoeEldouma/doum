@@ -165,6 +165,31 @@ impl Daemon {
         })
     }
 
+    /// The `[mcp]` limits for jobs submitted by AI agents, enforced here as well as in the MCP server, so an agent job
+    /// that reaches the API another way gets the same rules. (Agents run as you, so this is a guard rail for
+    /// well-behaved agents, not a security boundary.)
+    pub fn agent_limits(&self, r: &mut SubmitReq) -> Result<(), String> {
+        let m = &self.cfg.mcp;
+        if r.shards == 0 || r.shards > m.max_shards {
+            return Err(format!("agent jobs may use 1..={} shards ([mcp] max_shards)", m.max_shards));
+        }
+        let open = self
+            .store
+            .jobs
+            .iter()
+            .filter(|j| j.owner == crate::mcp::OWNER && !j.state.is_terminal())
+            .count();
+        if open >= m.max_jobs as usize {
+            return Err(format!(
+                "agents may have at most {} jobs queued or running ([mcp] max_jobs)",
+                m.max_jobs
+            ));
+        }
+        r.mode = Some(m.mode);
+        r.no_pause = false;
+        Ok(())
+    }
+
     /// Shards Doum can hand out: the configured total minus what plain Slurm jobs (not Doum's) hold.
     fn capacity(&self) -> u32 {
         self.cfg.total_shards.saturating_sub(self.external_shards())
@@ -634,6 +659,29 @@ impl Daemon {
         }
     }
 
+    /// Remove files nothing needs any more: exit records of finished jobs (their exit code is already in the
+    /// state), and logs of jobs Doum has forgotten (finished more than 7 days ago).
+    fn clean_files(&self) {
+        let live = |id: u64| self.store.jobs.iter().find(|j| j.id == id);
+        let id_of = |name: &str| name.split(['.', '-']).next().and_then(|s| s.parse::<u64>().ok());
+        for (dir, keep) in [("exit", false), ("logs", true)] {
+            let Ok(rd) = std::fs::read_dir(self.paths.state_dir.join(dir)) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                let Some(id) = id_of(&name) else { continue };
+                let stale = match live(id) {
+                    None => true,
+                    Some(j) => !keep && j.state.is_terminal(),
+                };
+                if stale {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+    }
+
     /// One scheduling pass. Called every second.
     pub fn tick(&mut self) {
         let t = now();
@@ -661,6 +709,7 @@ impl Daemon {
         if t.saturating_sub(self.last_prune) >= 3600 {
             self.last_prune = t;
             self.store.prune(t, 7 * 86400);
+            self.clean_files();
             self.dirty = true;
         }
         let ids: Vec<JobId> = self
@@ -1172,11 +1221,14 @@ async fn h_job(AxState(s): AxState<Shared>, Path(id): Path<JobId>) -> ApiResult<
         .map(Json)
         .ok_or(ApiErr(StatusCode::NOT_FOUND, "no such job".into()))
 }
-async fn h_submit(AxState(s): AxState<Shared>, h: HeaderMap, Json(r): Json<SubmitReq>) -> ApiResult<SubmitResp> {
+async fn h_submit(AxState(s): AxState<Shared>, h: HeaderMap, Json(mut r): Json<SubmitReq>) -> ApiResult<SubmitResp> {
     let mut d = lock(&s);
     authed(&d, &h)?;
     if r.cmd.is_empty() {
         return Err(ApiErr(StatusCode::BAD_REQUEST, "empty command".into()));
+    }
+    if r.owner == crate::mcp::OWNER {
+        d.agent_limits(&mut r).map_err(|e| ApiErr(StatusCode::FORBIDDEN, e))?;
     }
     Ok(Json(d.submit(r)))
 }

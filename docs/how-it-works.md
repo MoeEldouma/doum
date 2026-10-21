@@ -113,7 +113,8 @@ When a job's turn comes, it is marked *running* (it now holds its shards) and th
 `doum run` process for a foreground job) does these steps before the command, unless the job was submitted with
 `--no-hooks`:
 
-1. **Free memory.** If `[memory] check` is on, wait until `MemAvailable` is at least the job's memory plus
+1. **Free memory.** If `[memory] check` is on, wait until the free memory (the GPU's own when the card reports it,
+   otherwise `MemAvailable`) is at least the job's memory plus
    `headroom_gb` (6 GB). The job's memory is `--mem`, or `shards × gb_per_shard` capped at 60% of the total budget.
    On a unified-memory machine this is the real GPU headroom, and it catches memory that the shard numbers do not
    know about: page cache, the desktop, a process outside the queue, a model that a previous job has not fully

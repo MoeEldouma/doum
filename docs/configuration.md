@@ -34,7 +34,7 @@ with `--no-hooks`).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `check` | bool | `true` | Wait until `MemAvailable` (from `/proc/meminfo`) is at least the job's memory plus `headroom_gb`. |
+| `check` | bool | `true` | Wait until there is free memory for the job plus `headroom_gb`: the GPU's own free memory when the card reports it, otherwise `MemAvailable` (from `/proc/meminfo`). |
 | `headroom_gb` | float | `6.0` | Extra GB that must stay free on top of the job's memory. |
 
 The job's memory is `--mem` if given, otherwise `shards × gb_per_shard`, capped at 60% of
@@ -42,9 +42,10 @@ The job's memory is `--mem` if given, otherwise `shards × gb_per_shard`, capped
 shards and writes `[doum] WAIT for memory: ...` to its log once a minute. There is no timeout: it waits until the
 memory is there or the job is cancelled.
 
-On unified-memory machines (GB10, DGX Spark, Jetson-style SoCs) `MemAvailable` is the real headroom for GPU work,
-which is why this check exists. **On a discrete GPU, `MemAvailable` is system RAM, not VRAM**, so this check does not
-protect VRAM; the shard budget does. That setup is untested; you may prefer `check = false` there.
+Which free memory counts depends on the machine. A card with its own memory reports it to `nvidia-smi`
+(`memory.free`), and the check uses that. On unified-memory machines (GB10, DGX Spark, Jetson-style SoCs) `nvidia-smi`
+reports `[N/A]`, and `MemAvailable` is the real headroom for GPU work, so the check uses that. The discrete-GPU path
+is untested so far; reports are welcome.
 
 ## `[hooks]`
 
@@ -151,8 +152,8 @@ Read by the ComfyUI plugin (in ComfyUI's environment): `DOUM_BIN`, `DOUM_API`, `
 | `~/.local/state/doum/` | The state directory, mode 0700 (set on every start). |
 | `~/.local/state/doum/state.json` | Jobs and open questions, including each job's environment (needed to restart paused jobs; never returned by the API). Mode 0600, written atomically after every change. Finished jobs older than 7 days are dropped. |
 | `~/.local/state/doum/token` | The API token (48 hex characters, mode 0600), created by the daemon on first start. |
-| `~/.local/state/doum/logs/<id>-<name>.log` | Output of detached jobs. Not cleaned up automatically. |
-| `~/.local/state/doum/exit/<id>.<attempt>` | Exit code of each attempt, written by the job runner; `<id>.<attempt>.pgid` holds the command's process group. Not cleaned up automatically. |
+| `~/.local/state/doum/logs/<id>-<name>.log` | Output of detached jobs. Removed when Doum forgets the job (7 days after it finished). |
+| `~/.local/state/doum/exit/<id>.<attempt>` | Exit code of each attempt, written by the job runner; `<id>.<attempt>.pgid` holds the command's process group. Removed once the job has finished and its exit code is recorded. |
 | `~/.local/state/doum/comfyui/` | Stop-handshake flag files of the ComfyUI plugin (under `DOUM_STATE_DIR` if ComfyUI's environment sets it). |
 
 ## Complete example

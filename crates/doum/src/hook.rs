@@ -8,16 +8,72 @@ use std::io::Read;
 
 use crate::config::ClaudeHookCfg;
 
-/// Why a command must go through doum, or None if it may run as is.
+/// Split a shell command into the parts that run separately (`;`, `&&`, `||`, `|`, `&`, newlines), keeping quoted
+/// text together, so `doum run -- sh -c 'a; b'` stays one part and `echo doum; ollama run x` is two.
+fn segments(command: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut cur = String::new();
+    let (mut sq, mut dq) = (false, false);
+    let mut chars = command.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if !sq => {
+                cur.push(c);
+                if let Some(n) = chars.next() {
+                    cur.push(n);
+                }
+            }
+            '\'' if !dq => {
+                sq = !sq;
+                cur.push(c);
+            }
+            '"' if !sq => {
+                dq = !dq;
+                cur.push(c);
+            }
+            ';' | '&' | '|' | '\n' if !sq && !dq => {
+                while matches!(chars.peek(), Some('&') | Some('|')) {
+                    chars.next();
+                }
+                out.push(std::mem::take(&mut cur));
+            }
+            _ => cur.push(c),
+        }
+    }
+    out.push(cur);
+    out.into_iter().filter(|s| !s.trim().is_empty()).collect()
+}
+
+/// Where `doum` itself is invoked in a part (as a word: `doum` or a path ending in `/doum`), if it is.
+fn doum_at(seg: &str) -> Option<usize> {
+    let mut pos = 0;
+    for w in seg.split_whitespace() {
+        let at = seg[pos..].find(w).map(|i| i + pos)?;
+        pos = at + w.len();
+        if w == "doum" || w.ends_with("/doum") {
+            return Some(at);
+        }
+    }
+    None
+}
+
+/// Why a command must go through doum, or None if it may run as is. Each part of a compound command is checked on
+/// its own: a part that starts GPU work passes only if doum runs it (`doum run ... -- <gpu command>`).
 pub fn check(cfg: &ClaudeHookCfg, command: &str) -> Option<String> {
-    if command.contains("doum:allow") || command.split_whitespace().any(|w| w == "doum" || w.ends_with("/doum")) {
+    if command.contains("doum:allow") {
         return None;
     }
-    for p in &cfg.gpu_patterns {
-        let Ok(re) = RegexBuilder::new(p).case_insensitive(true).build() else {
-            continue;
-        };
-        if let Some(m) = re.find(command) {
+    let patterns: Vec<regex::Regex> = cfg
+        .gpu_patterns
+        .iter()
+        .filter_map(|p| RegexBuilder::new(p).case_insensitive(true).build().ok())
+        .collect();
+    for seg in segments(command) {
+        for re in &patterns {
+            let Some(m) = re.find(&seg) else { continue };
+            if doum_at(&seg).is_some_and(|d| d < m.start()) {
+                continue; // `doum run ... -- <this>`: queued
+            }
             return Some(format!(
                 "`{}` starts GPU work outside the GPU queue (doum). On this machine all GPU work goes through doum so jobs \
                  don't crash each other: use the doum MCP tools (gpu_status, then gpu_run) or prefix the command with \
@@ -88,6 +144,24 @@ mod tests {
         assert!(!blocked("cargo build --release"));
         assert!(!blocked("curl http://127.0.0.1:8188/queue"));
         assert!(!blocked("ls ~/models"));
+    }
+
+    #[test]
+    fn a_mention_of_doum_does_not_let_other_parts_through() {
+        assert!(blocked("echo doum; ollama run qwen3"));
+        assert!(blocked("doum status && python3 train_lora.py"));
+        assert!(blocked("ollama serve | doum progress x"));
+        assert!(blocked("cat doum.toml\nvllm serve Qwen/Qwen3-8B"));
+        assert!(blocked("echo 'doum' && torchrun x.py"));
+        assert!(blocked("ollama run x # mentions doum"));
+    }
+
+    #[test]
+    fn quoted_commands_stay_whole() {
+        assert!(!blocked("doum run -s 8 -- sh -c 'cd x; python3 train_lora.py'"));
+        assert!(!blocked("doum run -s 8 -- bash -lc \"ollama run qwen3 && echo done\""));
+        assert!(!blocked("cd proj && doum run -d -s 24 -- python3 train_lora.py"));
+        assert!(!blocked("nohup doum run -d -s 60 -- ollama serve &"));
     }
 
     #[test]

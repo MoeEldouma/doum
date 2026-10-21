@@ -153,10 +153,10 @@ fn wait_for_memory(cfg: &Config, a: &ExecArgs) {
     let mut tried_comfy = false;
     let mut last_note = Instant::now() - Duration::from_secs(3600);
     loop {
-        let free = sys::mem_available_gb();
+        let (free, what) = sys::gpu_headroom_gb();
         if free >= need {
             say(&format!(
-                "memory OK: {free:.0} GB free, job needs ~{:.0} GB + {:.0} GB headroom",
+                "{what} OK: {free:.0} GB free, job needs ~{:.0} GB + {:.0} GB headroom",
                 a.mem_gb, cfg.memory.headroom_gb
             ));
             return;
@@ -170,7 +170,7 @@ fn wait_for_memory(cfg: &Config, a: &ExecArgs) {
             }
         }
         if last_note.elapsed() >= Duration::from_secs(60) {
-            say(&format!("WAIT for memory: {free:.0} GB free, need {need:.0} GB"));
+            say(&format!("WAIT for {what}: {free:.0} GB free, need {need:.0} GB"));
             last_note = Instant::now();
         }
         std::thread::sleep(Duration::from_secs(5));

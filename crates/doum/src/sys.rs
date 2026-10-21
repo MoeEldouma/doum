@@ -3,6 +3,30 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+/// The GPU's own free memory in GB, when it reports it (cards with their own memory). `None` on unified-memory
+/// machines such as the GB10 / DGX Spark, where nvidia-smi says `[N/A]` and MemAvailable is the real headroom.
+pub fn gpu_mem_free_gb() -> Option<f64> {
+    let out = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=memory.free", "--format=csv,noheader,nounits"])
+        .output()
+        .ok()?;
+    parse_mem_free(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// First GPU's `memory.free` (MiB) as GB; `None` for `[N/A]` or no GPU.
+pub fn parse_mem_free(text: &str) -> Option<f64> {
+    text.lines().next()?.trim().parse::<f64>().ok().map(|mib| mib / 1024.0)
+}
+
+/// Free memory that matters for GPU work, and where it came from: the card's own when it reports it, otherwise
+/// MemAvailable (unified memory).
+pub fn gpu_headroom_gb() -> (f64, &'static str) {
+    match gpu_mem_free_gb() {
+        Some(g) => (g, "GPU memory"),
+        None => (mem_available_gb(), "memory"),
+    }
+}
+
 /// MemAvailable in GB. On unified-memory machines (GB10 / DGX Spark) this is the real GPU headroom.
 pub fn mem_available_gb() -> f64 {
     std::fs::read_to_string("/proc/meminfo")
@@ -141,5 +165,12 @@ mod tests {
     #[test]
     fn meminfo_reads_something() {
         assert!(mem_available_gb() > 0.0);
+    }
+
+    #[test]
+    fn reads_free_gpu_memory_only_when_reported() {
+        assert_eq!(parse_mem_free("[N/A]\n"), None);
+        assert_eq!(parse_mem_free(""), None);
+        assert_eq!(parse_mem_free("40960\n81920\n"), Some(40.0));
     }
 }

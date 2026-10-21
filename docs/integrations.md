@@ -134,8 +134,10 @@ claude mcp add --scope user doum -- doum mcp
 
 Agent limits (config `[mcp]`, see [Configuration](configuration.md#mcp)): at most `max_shards` (60) per job, at most
 `max_jobs` (2) unfinished agent jobs, agent jobs use mode `wait` so they never pause your work, agents can pause and
-cancel only jobs started through MCP (owner `agent`), and they cannot answer your questions. These limits apply to
-the MCP tools; they are not a sandbox. An agent with a shell can still run `doum run` directly.
+cancel only jobs started through MCP (owner `agent`), and they cannot answer your questions. The daemon enforces the shard,
+job and mode limits too, for every job submitted as owner `agent`, however it reaches the API. They are guard rails,
+not a sandbox: agents run as you, so an agent with a shell can still run `doum run` directly (the hook below nudges
+it to).
 
 ### PreToolUse hook
 
@@ -152,11 +154,12 @@ Add it to `~/.claude/settings.json`:
     "hooks": [ { "type": "command", "command": "doum claude-hook", "timeout": 10 } ] } ] } }
 ```
 
-- Commands that contain the word `doum` (or a path ending in `/doum`) pass, so `doum run ... -- python train.py`
-  is allowed.
+- Each part of a compound command (split on `;`, `&&`, `||`, `|`, `&` and newlines, with quoted text kept whole) is
+  checked on its own. A part that starts GPU work passes only if Doum runs it, so `doum run ... -- python train.py`
+  is allowed, while `echo doum; ollama run qwen3` is blocked.
 - Escape hatch for a deliberate exception: put `# doum:allow` in the command. The skill tells Claude to ask you first.
-- It is a backstop for honest mistakes, not a security boundary: any command that contains `doum` or `doum:allow`
-  anywhere passes.
+- It is a backstop for honest mistakes, not a security boundary: a command that hides GPU work well enough (in a
+  script file, for example) is not caught, and `# doum:allow` lets anything through.
 - To add your own advice to the message (for example where local LLMs are served), set `[claude_hook] hint` in the
   config (see [Configuration](configuration.md#claude_hook)).
 

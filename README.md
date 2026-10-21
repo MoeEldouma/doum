@@ -47,8 +47,8 @@ queue: one binary with a daemon on `127.0.0.1:8420`, a CLI, a terminal UI, a web
   has to save and reload its own checkpoint. See [Pausable jobs](#pausable-jobs).)
 - **Checks back.** If an interactive or foreground job has waited 20 minutes, Doum asks whether to pause what is in
   the way, keep waiting, or cancel.
-- **Pre-start checks.** Before each job: wait for enough free memory (`MemAvailable`, which is the real GPU headroom
-  on unified memory), ask an idle ComfyUI to unload its cached models if that memory is needed, and run your own
+- **Pre-start checks.** Before each job: wait for enough free memory (the card's own, or `MemAvailable`, which is the
+  real GPU headroom on unified memory), ask an idle ComfyUI to unload its cached models if that memory is needed, and run your own
   `pre_start` hook (a thermal cool-down gate, for example).
 - **Notices GPU work that bypasses it.** Processes that show up in `nvidia-smi` but belong to no Doum job are listed
   in `doum status` and alerted once.

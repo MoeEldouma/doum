@@ -3,7 +3,7 @@
 All notable changes to Doum are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Doum uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## v0.2.0 (2026-10-22)
 
 ### Added
 - Answer questions from your phone: ntfy buttons (Smart / Wait / Pause now) send the answer to a private answers topic
@@ -12,19 +12,6 @@ and Doum uses [Semantic Versioning](https://semver.org/).
 - Recent alerts are kept across restarts and shown in the panel ("Recent alerts") and by `doum alerts`.
 - A lease that has reported progress and then goes quiet for `stale_lease_s` (5 min) is released, with an alert. (A
   frozen ComfyUI once held 60 shards for 45 minutes.)
-
-### Changed
-- Clearer alerts: plain titles ("llm-writer is waiting for the GPU", "Paused comfyui"), one line per choice, "no
-  estimate" instead of "~unknown", an icon per kind on the phone, and a follow-up when a question times out.
-
-### Fixed
-- ComfyUI: a paused prompt is put back into ComfyUI's own queue, at the front, before its run ends, so it always
-  runs next. Re-queueing over HTTP a moment later let the next prompt in line run first. (Falls back to HTTP on
-  ComfyUI versions with a different queue.) Tested in CI.
-
-## v0.2.0 (2026-10-21)
-
-### Added
 - Slurm backend (`backend = "slurm"`): Doum decides, Slurm runs. Background jobs are submitted with `sbatch
   --gres=shard:N` to the lane's partition and show in `squeue` as `doum-<id>-<name>`; pause and cancel go through
   `scancel` (SIGTERM, SIGKILL after the grace period; a job Slurm hasn't started is cancelled); a restarted daemon picks
@@ -40,6 +27,9 @@ and Doum uses [Semantic Versioning](https://semver.org/).
   finished).
 
 ### Fixed
+- ComfyUI: a paused prompt is put back into ComfyUI's own queue, at the front, before its run ends, so it always
+  runs next. Re-queueing over HTTP a moment later let the next prompt in line run first. (Falls back to HTTP on
+  ComfyUI versions with a different queue.) Tested in CI.
 - The Claude hook checks each part of a compound command: `echo doum; ollama run x` used to pass because the command
   mentioned `doum`.
 - The memory check uses the GPU's own free memory when the card reports it (discrete GPUs), not system RAM.
@@ -51,6 +41,8 @@ and Doum uses [Semantic Versioning](https://semver.org/).
   each other. Nothing pauses a higher lane now, and the mark is cleared when that job starts.
 
 ### Changed
+- Clearer alerts: plain titles ("llm-writer is waiting for the GPU", "Paused comfyui"), one line per choice, "no
+  estimate" instead of "~unknown", an icon per kind on the phone, and a follow-up when a question times out.
 - Smart mode only pauses jobs in a lower lane (interactive work over batch work); jobs in the same lane no longer
   pause each other (in the simulator they did, about 20 times per job). Same-lane pausing needs `-m pause` or
   "Pause now".
